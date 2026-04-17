@@ -1,0 +1,118 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Sign In — Altius Intelligence Console{% endblock %}
+
+{% block content %}
+<style>
+  .login-wrap {
+    min-height: calc(100vh - 60px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: -40px -32px -80px;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 40px 36px 36px;
+  }
+  .login-logo {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .login-logo .wordmark {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--text);
+  }
+  .login-logo .tagline {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 6px;
+  }
+  .login-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0 -36px 28px;
+  }
+  .login-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  .login-submit {
+    width: 100%;
+    margin-top: 20px;
+    padding: 11px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .login-submit:hover {
+    background: rgba(200,148,58,0.2);
+    color: #e8b86a;
+    border-color: #e8b86a;
+  }
+  .login-error {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--red-bg);
+    border: 1px solid rgba(224,64,64,0.25);
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--red);
+    text-align: center;
+  }
+</style>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="wordmark">ALTIUS</div>
+      <div class="tagline">Intelligence Console</div>
+    </div>
+    <div class="login-divider"></div>
+    <div class="login-title">Administrator Access</div>
+    <form method="POST" action="/login">
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input
+          class="form-input"
+          type="password"
+          id="password"
+          name="password"
+          placeholder="Enter password"
+          autofocus
+          autocomplete="current-password"
+        />
+      </div>
+      <button type="submit" class="login-submit">Sign In →</button>
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          {% for msg in messages %}
+            <div class="login-error">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </form>
+  </div>
+</div>
+{% endblock %}

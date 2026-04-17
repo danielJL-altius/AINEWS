@@ -1,0 +1,104 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ sub.name or sub.email }} — Altius Intelligence Console{% endblock %}
+
+{% block content %}
+
+<a href="/" class="back-link">Back to Subscribers</a>
+
+<div class="page-header">
+  <div class="eyebrow">Subscriber Preferences</div>
+  <h1>{{ sub.name or sub.email }}</h1>
+  <p class="subtitle">
+    <span style="font-family: var(--font-mono); color: var(--text-muted);">{{ sub.email }}</span>
+    &nbsp;&nbsp;
+    {% if sub.active %}
+      <span class="badge badge-active">Active</span>
+    {% else %}
+      <span class="badge badge-inactive">Paused</span>
+    {% endif %}
+  </p>
+</div>
+
+<form method="POST" action="/subscriber/{{ sub.email }}/save">
+
+  <!-- TOPICS -->
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="section-label">Topics &mdash; select which categories this subscriber receives</div>
+    {% for topic in categories %}
+    <label class="toggle-wrap" for="topic-{{ loop.index }}">
+      <div>
+        <div class="toggle-label">{{ topic }}</div>
+      </div>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          id="topic-{{ loop.index }}"
+          name="topics"
+          value="{{ topic }}"
+          {% if topic in prefs.topics %}checked{% endif %}
+        />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </label>
+    </label>
+    {% endfor %}
+  </div>
+
+  <!-- SOURCES -->
+  <div class="card" style="margin-bottom: 28px;">
+    <div class="section-label">Sources &mdash; select which publications this subscriber sees</div>
+    <div class="source-grid">
+      {% for source in sources %}
+      <label class="toggle-wrap" for="source-{{ loop.index }}">
+        <div>
+          <div class="toggle-label" style="font-family: var(--font-mono); font-size: 13px;">{{ source }}</div>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            id="source-{{ loop.index }}"
+            name="sources"
+            value="{{ source }}"
+            {% if source in prefs.sources %}checked{% endif %}
+          />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <div style="display: flex; gap: 10px;">
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+      <a href="/" class="btn">Cancel</a>
+    </div>
+
+    <!-- Danger zone -->
+    <div style="display: flex; gap: 10px;">
+      <form method="POST" action="/subscriber/{{ sub.email }}/toggle" style="display:inline;">
+        <button type="submit" class="btn btn-sm">
+          {{ 'Pause Delivery' if sub.active else 'Resume Delivery' }}
+        </button>
+      </form>
+      <form method="POST" action="/subscriber/{{ sub.email }}/delete" style="display:inline;"
+            onsubmit="return confirm('Permanently remove {{ sub.name or sub.email }}?')">
+        <button type="submit" class="btn btn-sm btn-danger">Remove Subscriber</button>
+      </form>
+    </div>
+  </div>
+
+</form>
+
+<!-- Quick-select JS -->
+<script>
+  // Allow clicking the outer toggle-wrap label to check/uncheck (already handled by the inner label,
+  // but this prevents double-toggle when clicking the outer row text area).
+  document.querySelectorAll('.toggle-wrap').forEach(function(row) {
+    row.addEventListener('click', function(e) {
+      if (e.target.closest('label.toggle')) return; // let inner label handle it
+      var cb = row.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = !cb.checked;
+    });
+  });
+</script>
+{% endblock %}

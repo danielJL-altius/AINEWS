@@ -1,0 +1,34 @@
+# Environment / secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+.venv/
+venv/
+env/
+
+# Database (contains article data + sent emails — local only)
+data/news.db
+data/sent/
+
+# Preview outputs (generated locally)
+data/preview/*.html
+data/preview/*.txt
+data/preview/*.subject.txt
+
+# macOS
+.DS_Store
+
+# IDE
+.cursor/
+.vscode/
+*.swp

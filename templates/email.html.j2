@@ -1,0 +1,177 @@
+{#
+  Daily News Email template.
+
+  Design rules:
+  - Single column, max-width 600px (standard email safe width).
+  - Inline CSS — Gmail/Outlook strip <style> in many contexts.
+  - Key headlines (the "hero" + first category) must fit above the fold on
+    a ~700-tall mobile viewport. That's why:
+      * no large images
+      * the hero is 1–2 lines, bold
+      * category spacing is tight
+  - Each bullet renders as: "• summary — Source →" (link on the arrow).
+  - Colors are conservative (navy + black + light gray) — this reads as a
+    professional brief, not a marketing blast.
+#}
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>{{ subject }}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f4f6; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#1a1a1a;">
+  <!-- Preheader: hidden on render, shown in inbox preview -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">
+    {{ hero|e }}
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f6;">
+    <tr>
+      <td align="center" style="padding:16px 8px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+               style="width:600px; max-width:100%; background-color:#ffffff; border-radius:6px; overflow:hidden;">
+
+          <!-- Header / masthead -->
+          <tr>
+            <td style="padding:20px 24px 12px 24px; border-bottom:2px solid #0a2540;">
+              <div style="font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:#5b6472; margin-bottom:4px;">
+                Daily News Brief &middot; {{ today_str }}
+              </div>
+              <div style="font-size:20px; font-weight:700; color:#0a2540; line-height:1.25;">
+                {{ subject }}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Intelligence Funnel — sits between title and first story -->
+          {% if ingest_stats %}
+          <tr>
+            <td style="padding:10px 24px; background-color:#f8f9fb; border-bottom:1px solid #e4e7eb;">
+              <div style="font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:#8a98a6; font-weight:600; margin-bottom:4px;">
+                Intelligence Funnel
+              </div>
+              <div style="font-size:12px; color:#5b6472; line-height:1.5;">
+                <span style="color:#0a2540; font-weight:600;">{{ ingest_stats.sources_count }}</span> sources monitored
+                &nbsp;&middot;&nbsp;
+                <span style="color:#0a2540; font-weight:600;">{{ ingest_stats.articles_scanned }}</span> articles scanned
+                &nbsp;&middot;&nbsp;
+                <span style="color:#0a2540; font-weight:600;">{{ ingest_stats.articles_to_llm }}</span> passed filters
+                &nbsp;&middot;&nbsp;
+                <span style="color:#0a2540; font-weight:700;">{{ ingest_stats.articles_surfaced }} surfaced</span>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+
+          <!-- Hero / top story -->
+          {% if hero %}
+          <tr>
+            <td style="padding:16px 24px 8px 24px;">
+              <div style="font-size:15px; line-height:1.45; color:#1a1a1a; font-weight:500;">
+                {{ hero }}
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+
+          <!-- Categories -->
+          {% for cat in categories %}
+          <tr>
+            <td style="padding:14px 24px 6px 24px;">
+              <div style="font-size:13px; font-weight:700; color:#0a2540; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid #e4e7eb; padding-bottom:4px;">
+                {{ cat.name }}
+              </div>
+            </td>
+          </tr>
+
+          {% if cat.name == "Markets" %}
+            {# Markets section — no links, compact key/value layout #}
+            <tr>
+              <td style="padding:6px 24px 12px 24px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px; line-height:1.5;">
+                  {% if cat.market_snapshot.equity_futures %}
+                  <tr><td style="padding:2px 0; color:#5b6472; width:110px;">Futures</td><td style="padding:2px 0;">{{ cat.market_snapshot.equity_futures }}</td></tr>
+                  {% endif %}
+                  {% if cat.market_snapshot.movers %}
+                  <tr><td style="padding:2px 0; color:#5b6472;">Movers</td><td style="padding:2px 0;">{{ cat.market_snapshot.movers }}</td></tr>
+                  {% endif %}
+                  {% if cat.market_snapshot.commodities %}
+                  <tr><td style="padding:2px 0; color:#5b6472;">Commodities</td><td style="padding:2px 0;">{{ cat.market_snapshot.commodities }}</td></tr>
+                  {% endif %}
+                  {% if cat.market_snapshot.yields %}
+                  <tr><td style="padding:2px 0; color:#5b6472;">Yields</td><td style="padding:2px 0;">{{ cat.market_snapshot.yields }}</td></tr>
+                  {% endif %}
+                  {% if cat.market_snapshot.fx %}
+                  <tr><td style="padding:2px 0; color:#5b6472;">FX</td><td style="padding:2px 0;">{{ cat.market_snapshot.fx }}</td></tr>
+                  {% endif %}
+                  {% if cat.market_snapshot.crypto %}
+                  <tr><td style="padding:2px 0; color:#5b6472;">Crypto</td><td style="padding:2px 0;">{{ cat.market_snapshot.crypto }}</td></tr>
+                  {% endif %}
+                </table>
+              </td>
+            </tr>
+          {% else %}
+            {# Regular bullet list category #}
+            <tr>
+              <td style="padding:4px 24px 8px 24px;">
+                {% if cat.bullets %}
+                  {% for b in cat.bullets %}
+                    <div style="font-size:14px; line-height:1.5; padding:6px 0; border-bottom:1px solid #f0f2f4;">
+                      <span style="color:#0a2540; font-weight:700; display:inline-block; width:12px;">&bull;</span>
+                      <span>{{ b.text }}</span>
+                      {% if b.source or b.url %}
+                      <span style="color:#5b6472; font-size:12px;">
+                        ({{ b.source }}{% if b.url %} &middot; <a href="{{ b.url }}" style="color:#0a2540; text-decoration:underline;">link</a>{% endif %})
+                      </span>
+                      {% endif %}
+                      {% if b.implication %}
+                      <div style="font-size:12px; color:#5b6472; font-style:italic; margin-top:3px; padding-left:14px; line-height:1.45;">
+                        &#8614; {{ b.implication }}
+                      </div>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <div style="font-size:13px; color:#5b6472; padding:4px 0 8px 0; font-style:italic;">
+                    No material same-day stories.
+                  </div>
+                {% endif %}
+              </td>
+            </tr>
+          {% endif %}
+          {% endfor %}
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 24px 20px 24px; border-top:1px solid #e4e7eb; font-size:11px; color:#5b6472; line-height:1.6;">
+              Altius Daily News &middot; Generated {{ generated_at }}<br />
+              {% if ingest_stats and ingest_stats.all_sources %}
+              <div style="margin-top:8px;">
+                <span style="font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#8a98a6; font-weight:600;">Sources monitored</span><br />
+                <span style="font-size:11px; line-height:2;">
+                  {% for src in ingest_stats.all_sources %}
+                    {% if src.active %}
+                      <span style="color:#0a2540; font-weight:600;">{{ src.name }}</span>
+                    {% else %}
+                      <span style="color:#b0bcc8; text-decoration:line-through;" title="Scanned — no content surfaced today">{{ src.name }}</span>
+                    {% endif %}
+                    {% if not loop.last %}&nbsp;&middot;&nbsp;{% endif %}
+                  {% endfor %}
+                </span>
+              </div>
+              {% else %}
+              Sources: WSJ, FT, Bloomberg, Reuters, NYT, Barron's, Institutional Investor,
+              Restaurant Business Online, Economic Times, CNBC, Yahoo Finance, BizToc.
+              {% endif %}
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

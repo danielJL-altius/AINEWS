@@ -1,0 +1,118 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Subscribers — Altius Intelligence Console{% endblock %}
+
+{% block content %}
+
+{% set active_count = subscribers | selectattr('active', 'eq', 1) | list | length %}
+{% set total_count = subscribers | length %}
+
+<div class="page-header">
+  <div class="eyebrow">Subscriber Management</div>
+  <h1>Daily Brief Recipients</h1>
+  <p class="subtitle">Manage who receives the morning brief and configure their topic &amp; source preferences.</p>
+</div>
+
+<div class="stat-row">
+  <div class="stat">
+    <span class="stat-value">{{ active_count }}</span>
+    <span class="stat-label">Active</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ total_count }}</span>
+    <span class="stat-label">Total</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ total_count - active_count }}</span>
+    <span class="stat-label">Paused</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Subscribers</span>
+  </div>
+
+  {% if subscribers %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Recipient</th>
+        <th>Added</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sub in subscribers %}
+      <tr>
+        <td>
+          <div class="sub-info">
+            <div class="sub-avatar">
+              {{ (sub.name or sub.email)[:2] | upper }}
+            </div>
+            <div>
+              <div class="sub-name">{{ sub.name or '—' }}</div>
+              <div class="sub-email">{{ sub.email }}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">
+            {{ sub.created_at[:10] if sub.created_at else '—' }}
+          </span>
+        </td>
+        <td>
+          {% if sub.active %}
+            <span class="badge badge-active">Active</span>
+          {% else %}
+            <span class="badge badge-inactive">Paused</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="table-actions">
+            <a href="/subscriber/{{ sub.email }}" class="btn btn-sm">Edit Prefs</a>
+
+            <form method="POST" action="/subscriber/{{ sub.email }}/toggle" style="display:inline;">
+              <button type="submit" class="btn btn-sm" title="{{ 'Pause' if sub.active else 'Activate' }}">
+                {{ 'Pause' if sub.active else 'Activate' }}
+              </button>
+            </form>
+
+            <form method="POST" action="/subscriber/{{ sub.email }}/delete" style="display:inline;"
+                  onsubmit="return confirm('Remove {{ sub.name or sub.email }} from the subscriber list?')">
+              <button type="submit" class="btn btn-sm btn-danger" title="Delete">✕</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <p>No subscribers yet. Add the first one below.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add subscriber -->
+<div class="add-card">
+  <div class="add-card-title">Add Subscriber</div>
+  <form method="POST" action="/add">
+    <div class="form-row">
+      <div class="form-group" style="max-width: 200px;">
+        <label class="form-label" for="name">Name</label>
+        <input class="form-input" type="text" id="name" name="name" placeholder="Justin Fox" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="email">Email</label>
+        <input class="form-input" type="email" id="email" name="email" placeholder="jfox@3g-capital.com" required />
+      </div>
+      <div style="padding-bottom: 1px;">
+        <button type="submit" class="btn btn-primary">+ Add</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

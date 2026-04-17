@@ -1,0 +1,23 @@
+DAILY NEWS BRIEF — {{ today_str }}
+
+{% if ingest_stats %}Intelligence Funnel: {{ ingest_stats.sources_count }} sources monitored · {{ ingest_stats.articles_scanned }} articles scanned · {{ ingest_stats.articles_to_llm }} passed filters · {{ ingest_stats.articles_surfaced }} surfaced
+
+{% endif %}{% if hero %}{{ hero }}
+
+{% endif %}{% for cat in categories %}
+== {{ cat.name|upper }} ==
+{% if cat.name == "Markets" %}{% if cat.market_snapshot.equity_futures %}Futures:     {{ cat.market_snapshot.equity_futures }}
+{% endif %}{% if cat.market_snapshot.movers %}Movers:      {{ cat.market_snapshot.movers }}
+{% endif %}{% if cat.market_snapshot.commodities %}Commodities: {{ cat.market_snapshot.commodities }}
+{% endif %}{% if cat.market_snapshot.yields %}Yields:      {{ cat.market_snapshot.yields }}
+{% endif %}{% if cat.market_snapshot.fx %}FX:          {{ cat.market_snapshot.fx }}
+{% endif %}{% if cat.market_snapshot.crypto %}Crypto:      {{ cat.market_snapshot.crypto }}
+{% endif %}{% else %}{% if cat.bullets %}{% for b in cat.bullets %}• {{ b.text }}{% if b.source %} ({{ b.source }}){% endif %}{% if b.url %} {{ b.url }}{% endif %}
+{% if b.implication %}  ↳ {{ b.implication }}
+{% endif %}{% endfor %}{% else %}(no material same-day stories)
+{% endif %}{% endif %}
+{% endfor %}
+--
+Altius Daily News · Generated {{ generated_at }}
+{% if ingest_stats and ingest_stats.all_sources %}Sources monitored: {% for src in ingest_stats.all_sources %}{{ src.name }}{% if not src.active %} [no content today]{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+{% endif %}

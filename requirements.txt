@@ -1,0 +1,5 @@
+eventregistry>=9.1
+anthropic>=0.40
+jinja2>=3.1
+python-dotenv>=1.0
+flask>=3.0
