@@ -42,6 +42,9 @@ from src.db import (
 app = Flask(__name__, template_folder="templates")
 app.secret_key = DASHBOARD_SECRET_KEY
 
+# Ensure DB schema exists whether started via gunicorn or directly.
+init_db(DB_PATH)
+
 
 # =========================================================================
 # AUTH
@@ -174,7 +177,7 @@ def delete_sub(email: str):
 # =========================================================================
 
 if __name__ == "__main__":
-    init_db(DB_PATH)
-    print("Starting Altius Intelligence Console on http://localhost:5050")
+    port = int(os.getenv("PORT", 5050))
+    print(f"Starting Altius Intelligence Console on http://localhost:{port}")
     print(f"Password: {DASHBOARD_PASSWORD}")
-    app.run(debug=True, port=5050, host="127.0.0.1")
+    app.run(debug=False, port=port, host="0.0.0.0")
