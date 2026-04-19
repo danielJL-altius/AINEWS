@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 # Load .env file if present. Must happen before any os.getenv() calls below.
 try:
@@ -86,26 +87,9 @@ SOURCE_DISPLAY_NAMES: dict = {
 }
 
 # =========================================================================
-# PRIORITY COMPANIES — elevate material news involving these names
+# PRIORITY COMPANIES / TICKERS / 3G FLAGS — defaults (merged with data/ingest_settings.json)
 # =========================================================================
-
-PRIORITY_COMPANIES: List[str] = [
-    "Restaurant Brands International",
-    "Kraft Heinz",
-    "Hunter Douglas",
-    "Skechers",
-]
-
-PRIORITY_TICKERS: List[str] = ["QSR", "KHC", "SKX"]
-
-FLAG_NAMES_3G: List[str] = [
-    "3G Capital",
-    "Alex Behring",
-    "Daniel Schwartz",
-    "Jorge Paulo Lemann",
-    "Joao Castro Neves",
-    "João Castro Neves",
-]
+# PRIORITY_COMPANIES, PRIORITY_TICKERS, FLAG_NAMES_3G are assigned after _INGEST_SNAPSHOT.
 
 # =========================================================================
 # KEYWORD SEED LISTS PER CATEGORY
@@ -169,32 +153,122 @@ _SECTOR_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     ],
 }
 
+# Ordered sector keys for ingestion UI and data/ingest_settings.json
+SECTOR_INGEST_CATEGORIES: List[str] = list(_SECTOR_CATEGORY_KEYWORDS.keys())
 
-def _parse_watchlist_from_env() -> List[str]:
+_DEFAULT_WATCHLIST_FALLBACK: List[str] = [
+    "Altius Capital",
+    "3G Capital",
+    "Restaurant Brands International",
+    "Kraft Heinz",
+]
+
+_DEFAULT_PRIORITY_COMPANIES: List[str] = [
+    "Restaurant Brands International",
+    "Kraft Heinz",
+    "Hunter Douglas",
+    "Skechers",
+]
+
+_DEFAULT_PRIORITY_TICKERS: List[str] = ["QSR", "KHC", "SKX"]
+
+_DEFAULT_FLAG_NAMES_3G: List[str] = [
+    "3G Capital",
+    "Alex Behring",
+    "Daniel Schwartz",
+    "Jorge Paulo Lemann",
+    "Joao Castro Neves",
+    "João Castro Neves",
+]
+
+
+def _load_ingest_snapshot() -> Dict[str, Any]:
+    """On-disk settings from dashboard (data/ingest_settings.json)."""
+    p = Path(__file__).resolve().parent / "data" / "ingest_settings.json"
+    if not p.is_file():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _merge_str_list(snapshot: Dict[str, Any], key: str, default: List[str]) -> List[str]:
+    if not snapshot or key not in snapshot:
+        return list(default)
+    v = snapshot[key]
+    if not isinstance(v, list):
+        return list(default)
+    return [str(x).strip() for x in v if str(x).strip()]
+
+
+def _merge_sector_keywords(snapshot: Dict[str, Any]) -> Dict[str, List[str]]:
+    merged = {k: list(v) for k, v in _SECTOR_CATEGORY_KEYWORDS.items()}
+    sk = snapshot.get("sector_keywords") if snapshot else None
+    if not isinstance(sk, dict):
+        return merged
+    for k, v in sk.items():
+        if k in merged and isinstance(v, list):
+            merged[k] = [str(x).strip() for x in v if str(x).strip()]
+    return merged
+
+
+def _resolve_watchlist(snapshot: Dict[str, Any]) -> List[str]:
     """
-    Comma-separated phrases from WATCHLIST_KEYWORDS.
-    If unset, use conservative defaults (firm + portfolio anchors).
-    Stay within NewsAPI.ai OR-query token limits (~15 word tokens on free tier).
+    WATCHLIST_KEYWORDS env overrides file and defaults (12-factor).
+    If ingest_settings.json sets watchlist_keywords (including []), use that.
+    Otherwise use built-in defaults.
     """
     raw = os.getenv("WATCHLIST_KEYWORDS", "").strip()
     if raw:
         return [p.strip() for p in raw.split(",") if p.strip()]
-    return [
-        "Altius Capital",
-        "3G Capital",
-        "Restaurant Brands International",
-        "Kraft Heinz",
-    ]
+    if snapshot and "watchlist_keywords" in snapshot:
+        wl = snapshot.get("watchlist_keywords")
+        if isinstance(wl, list):
+            return [str(x).strip() for x in wl if str(x).strip()]
+        return []
+    return list(_DEFAULT_WATCHLIST_FALLBACK)
 
 
-# Merged into ingestion: one Event Registry query for watchlist hits (same sources).
-_WATCHLIST = _parse_watchlist_from_env()
-CATEGORY_KEYWORDS: Dict[str, List[str]] = dict(_SECTOR_CATEGORY_KEYWORDS)
+def _int_from_env_or_snapshot(
+    env_key: str, snapshot: Dict[str, Any], snap_key: str, default: int
+) -> int:
+    ev = os.getenv(env_key)
+    if ev is not None and str(ev).strip() != "":
+        try:
+            return int(ev)
+        except ValueError:
+            pass
+    if snapshot and snap_key in snapshot:
+        try:
+            return int(snapshot[snap_key])
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+_INGEST_SNAPSHOT = _load_ingest_snapshot()
+
+_SECTOR_MERGED = _merge_sector_keywords(_INGEST_SNAPSHOT)
+CATEGORY_KEYWORDS: Dict[str, List[str]] = dict(_SECTOR_MERGED)
+_WATCHLIST = _resolve_watchlist(_INGEST_SNAPSHOT)
 if _WATCHLIST:
     CATEGORY_KEYWORDS["Keyword alerts"] = _WATCHLIST
 
 # Exposed for prompts so the LLM knows which terms drive this section.
 WATCHLIST_KEYWORDS: List[str] = list(_WATCHLIST)
+
+PRIORITY_COMPANIES: List[str] = _merge_str_list(
+    _INGEST_SNAPSHOT, "priority_companies", _DEFAULT_PRIORITY_COMPANIES
+)
+PRIORITY_TICKERS: List[str] = _merge_str_list(
+    _INGEST_SNAPSHOT, "priority_tickers", _DEFAULT_PRIORITY_TICKERS
+)
+FLAG_NAMES_3G: List[str] = _merge_str_list(
+    _INGEST_SNAPSHOT, "flag_names_3g", _DEFAULT_FLAG_NAMES_3G
+)
 
 # =========================================================================
 # INGESTION WINDOW
@@ -202,7 +276,12 @@ WATCHLIST_KEYWORDS: List[str] = list(_WATCHLIST)
 
 LOOKBACK_HOURS = 24
 MAX_ARTICLES_PER_CATEGORY = 40
-MAX_KEYWORD_ALERT_ARTICLES = int(os.getenv("MAX_KEYWORD_ALERT_ARTICLES", "32"))
+MAX_KEYWORD_ALERT_ARTICLES = _int_from_env_or_snapshot(
+    "MAX_KEYWORD_ALERT_ARTICLES",
+    _INGEST_SNAPSHOT,
+    "max_keyword_alert_articles",
+    32,
+)
 
 # =========================================================================
 # DATABASE
@@ -234,6 +313,49 @@ TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 
 INBOUND_WEBHOOK_SECRET = os.getenv("INBOUND_WEBHOOK_SECRET", "")
 FORWARD_ALLOWED_SENDERS = os.getenv("FORWARD_ALLOWED_SENDERS", "")
+
+
+def _int_from_file_only(snapshot: Dict[str, Any], key: str, default: int) -> int:
+    if snapshot and key in snapshot:
+        try:
+            return int(snapshot[key])
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _watchlist_keywords_for_form(snapshot: Dict[str, Any]) -> List[str]:
+    """Values shown in the Keyword alerts textarea (file overrides; else defaults)."""
+    if "watchlist_keywords" in snapshot:
+        v = snapshot.get("watchlist_keywords")
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return []
+    return list(_DEFAULT_WATCHLIST_FALLBACK)
+
+
+def get_ingest_dashboard_context() -> Dict[str, Any]:
+    """
+    Fresh read for the /settings page (do not rely on module-level snapshot
+    so edits appear immediately after save).
+    """
+    snap = _load_ingest_snapshot()
+    env_wl = bool(os.getenv("WATCHLIST_KEYWORDS", "").strip())
+    env_max = os.getenv("MAX_KEYWORD_ALERT_ARTICLES", "").strip() != ""
+    return {
+        "sector_keywords": _merge_sector_keywords(snap),
+        "watchlist_keywords": _watchlist_keywords_for_form(snap),
+        "priority_companies": _merge_str_list(snap, "priority_companies", _DEFAULT_PRIORITY_COMPANIES),
+        "priority_tickers": _merge_str_list(snap, "priority_tickers", _DEFAULT_PRIORITY_TICKERS),
+        "flag_names_3g": _merge_str_list(snap, "flag_names_3g", _DEFAULT_FLAG_NAMES_3G),
+        "max_keyword_alert_articles": _int_from_env_or_snapshot(
+            "MAX_KEYWORD_ALERT_ARTICLES", snap, "max_keyword_alert_articles", 32
+        ),
+        "max_keyword_alert_file": _int_from_file_only(snap, "max_keyword_alert_articles", 32),
+        "env_overrides_watchlist": env_wl,
+        "env_overrides_max_kw": env_max,
+    }
+
 
 # =========================================================================
 # DASHBOARD (admin web UI)

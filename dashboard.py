@@ -17,6 +17,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from functools import wraps
+from typing import List
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
@@ -26,7 +27,10 @@ from config import (
     DASHBOARD_SECRET_KEY,
     DB_PATH,
     PREFERRED_SOURCES,
+    SECTOR_INGEST_CATEGORIES,
+    get_ingest_dashboard_context,
 )
+from src.ingest_settings_io import save_raw
 from src.db import (
     connect,
     create_subscriber,
@@ -50,6 +54,20 @@ init_db(DB_PATH)
 # AUTH
 # =========================================================================
 
+def _parse_keyword_lines(text: str) -> List[str]:
+    out: List[str] = []
+    for line in (text or "").splitlines():
+        for part in line.split(","):
+            p = part.strip()
+            if p:
+                out.append(p)
+    return out
+
+
+def _parse_ticker_line(text: str) -> List[str]:
+    return [p.strip() for p in (text or "").replace("\n", ",").split(",") if p.strip()]
+
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -57,6 +75,37 @@ def login_required(f):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    if request.method == "POST":
+        sector: dict = {}
+        for i, cat in enumerate(SECTOR_INGEST_CATEGORIES):
+            raw = request.form.get(f"sector_kw_{i}", "")
+            sector[cat] = _parse_keyword_lines(raw)
+        try:
+            mx = int(request.form.get("max_keyword_alert_articles", "32").strip())
+            mx = max(1, min(mx, 200))
+        except ValueError:
+            mx = 32
+        payload = {
+            "version": 1,
+            "sector_keywords": sector,
+            "watchlist_keywords": _parse_keyword_lines(request.form.get("watchlist_keywords", "")),
+            "priority_companies": _parse_keyword_lines(request.form.get("priority_companies", "")),
+            "priority_tickers": _parse_ticker_line(request.form.get("priority_tickers", "")),
+            "flag_names_3g": _parse_keyword_lines(request.form.get("flag_names_3g", "")),
+            "max_keyword_alert_articles": mx,
+        }
+        save_raw(payload)
+        flash("Ingest settings saved to data/ingest_settings.json — restart is not required for the next scheduled job.")
+        return redirect(url_for("settings"))
+
+    ctx = get_ingest_dashboard_context()
+    ctx["categories_sector"] = SECTOR_INGEST_CATEGORIES
+    return render_template("dashboard/settings.html", **ctx)
 
 
 @app.route("/login", methods=["GET", "POST"])

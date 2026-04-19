@@ -100,6 +100,8 @@ daily_news/
 
 **Mailgun.** Outbound uses the Mailgun Messages API (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, optional `MAILGUN_REGION=us|eu`). Inbound forwarding uses Mailgun **Receiving → Routes** to POST to `inbound_server.py` at `/webhooks/inbound-email?token=...` (set `INBOUND_WEBHOOK_SECRET`). Verify DNS (SPF/DKIM) for your sending domain in the Mailgun dashboard.
 
+**Dashboard — keywords & ingest.** Run `python dashboard.py` and open **Keywords & ingest** (`/settings`). Edits are saved to `data/ingest_settings.json` (sector keyword seeds, Keyword alerts watchlist, priority companies/tickers, 3G flag names, max Keyword-alert articles). Environment variables `WATCHLIST_KEYWORDS` and `MAX_KEYWORD_ALERT_ARTICLES` still override file values when set. The subscriber page continues to control **which topics** each person receives (toggles on the same category names).
+
 ## Known limitations (v1)
 
 - **Source coverage gap.** NewsAPI.ai covers most of Justin's list well, but Institutional Investor and Barron's are thinner. If those sources become critical, add RSS fallback in `src/ingest.py`.

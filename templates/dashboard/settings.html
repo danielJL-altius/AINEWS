@@ -1,0 +1,124 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Ingest &amp; keywords — Altius Intelligence Console{% endblock %}
+
+{% block content %}
+
+<a href="/" class="back-link">Back to Subscribers</a>
+
+<div class="page-header">
+  <div class="eyebrow">News ingestion</div>
+  <h1>Categories &amp; keywords</h1>
+  <p class="subtitle">
+    These lists drive NewsAPI.ai (Event Registry) queries and the LLM prompt. Saved to
+    <span style="font-family: var(--font-mono); color: var(--text-muted);">data/ingest_settings.json</span>.
+    The next <code style="font-family:var(--font-mono); font-size:12px;">main.py</code> run picks them up.
+  </p>
+</div>
+
+{% if env_overrides_watchlist %}
+<div class="flash-list" style="margin-bottom:20px;">
+  <div class="flash-item" style="color: var(--accent);">
+    <strong>WATCHLIST_KEYWORDS</strong> is set in the environment and overrides the Keyword alerts list below at runtime.
+  </div>
+</div>
+{% endif %}
+{% if env_overrides_max_kw %}
+<div class="flash-list" style="margin-bottom:20px;">
+  <div class="flash-item" style="color: var(--accent);">
+    <strong>MAX_KEYWORD_ALERT_ARTICLES</strong> is set in the environment and overrides the cap below at runtime.
+  </div>
+</div>
+{% endif %}
+
+<form method="POST" action="/settings">
+
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+      <span class="card-title">Sector keyword seeds</span>
+    </div>
+    <div style="padding: 16px 20px 20px;">
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        One phrase per line (or comma-separated). NewsAPI.ai free tier limits ~15 word tokens per OR query — keep each list concise.
+      </p>
+      {% for cat in categories_sector %}
+      <div class="form-group" style="margin-bottom: 18px;">
+        <label class="form-label" for="sk-{{ loop.index0 }}">{{ cat }}</label>
+        <textarea
+          class="form-input"
+          id="sk-{{ loop.index0 }}"
+          name="sector_kw_{{ loop.index0 }}"
+          rows="5"
+          style="min-height: 100px; resize: vertical; font-family: var(--font-mono); font-size: 12px;"
+        >{{ (sector_keywords[cat] or []) | join('\n') }}</textarea>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+      <span class="card-title">Keyword alerts (watchlist)</span>
+    </div>
+    <div style="padding: 16px 20px 20px;">
+      <label class="form-label" for="watchlist">Firm / partner / portfolio names to monitor</label>
+      <textarea
+        class="form-input"
+        id="watchlist"
+        name="watchlist_keywords"
+        rows="5"
+        style="min-height: 100px; font-family: var(--font-mono); font-size: 12px;"
+        {% if env_overrides_watchlist %}readonly style="opacity:0.6;"{% endif %}
+      >{{ watchlist_keywords | join('\n') }}</textarea>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+      <span class="card-title">LLM — priority &amp; 3G flag layer</span>
+    </div>
+    <div style="padding: 16px 20px 20px;">
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label class="form-label" for="pc">Priority companies</label>
+        <textarea class="form-input" id="pc" name="priority_companies" rows="4" style="font-family: var(--font-mono); font-size: 12px;">{{ priority_companies | join('\n') }}</textarea>
+      </div>
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label class="form-label" for="pt">Priority tickers (comma or line)</label>
+        <input class="form-input" type="text" id="pt" name="priority_tickers" value="{{ priority_tickers | join(', ') }}" style="font-family: var(--font-mono); font-size: 12px;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="fg">3G flag names</label>
+        <textarea class="form-input" id="fg" name="flag_names_3g" rows="4" style="font-family: var(--font-mono); font-size: 12px;">{{ flag_names_3g | join('\n') }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 28px;">
+    <div class="card-header">
+      <span class="card-title">Ingest caps</span>
+    </div>
+    <div style="padding: 16px 20px 20px;">
+      <label class="form-label" for="mkw">Max articles for Keyword alerts query</label>
+      <input
+        class="form-input"
+        type="number"
+        id="mkw"
+        name="max_keyword_alert_articles"
+        min="1"
+        max="200"
+        value="{{ max_keyword_alert_file }}"
+        style="max-width: 120px; font-family: var(--font-mono);"
+        {% if env_overrides_max_kw %}readonly{% endif %}
+      />
+      {% if env_overrides_max_kw %}
+      <p style="margin-top:8px; font-size:12px; color: var(--text-muted);">Effective at runtime: {{ max_keyword_alert_articles }} (from env)</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <button type="submit" class="btn btn-primary">Save settings</button>
+    <a href="/" class="btn">Cancel</a>
+  </div>
+</form>
+
+{% endblock %}
