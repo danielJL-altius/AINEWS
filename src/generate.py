@@ -54,6 +54,7 @@ Categories (in order):
 CONTENT RULES
 =============================================================
 - Use ONLY the candidate articles provided in the user message. Do not invent articles, URLs, or quotes.
+- Candidates tagged \"User forwarded\" are email the user forwarded into this system; use the snippet as the article text and keep the URL exactly as given (it may be a non-web identifier).
 - Maximum 8 bullets per category.
 - Each bullet is a 1–2 sentence business-prose summary of a single news item.
 - One idea per bullet. No italics. No editorializing. No opinion pieces.

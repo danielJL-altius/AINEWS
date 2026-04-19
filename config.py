@@ -190,6 +190,18 @@ LLM_MAX_TOKENS = 8000
 TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 
 # =========================================================================
+# INBOUND EMAIL (forward-to-ingest webhook) — see inbound_server.py
+# =========================================================================
+#
+# SendGrid Inbound Parse posts to /webhooks/inbound-email?token=...
+# FORWARD_ALLOWED_SENDERS: comma-separated allowlist. Use full email and/or
+# @domain entries (e.g. "alice@firm.com,@client.com"). Empty = allow any
+# sender that presents the webhook secret (use only with HTTPS + secret).
+
+INBOUND_WEBHOOK_SECRET = os.getenv("INBOUND_WEBHOOK_SECRET", "")
+FORWARD_ALLOWED_SENDERS = os.getenv("FORWARD_ALLOWED_SENDERS", "")
+
+# =========================================================================
 # DASHBOARD (admin web UI)
 # =========================================================================
 
