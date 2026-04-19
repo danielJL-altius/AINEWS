@@ -149,6 +149,39 @@ def fetch_recent_articles(
     return list(cur.fetchall())
 
 
+def delete_articles_older_than(conn: sqlite3.Connection, cutoff_iso: str) -> int:
+    """Remove ingested rows older than cutoff (UTC ISO). Returns rows deleted."""
+    cur = conn.execute(
+        "DELETE FROM articles WHERE published_at < ?",
+        (cutoff_iso,),
+    )
+    n = cur.rowcount
+    conn.commit()
+    return int(n)
+
+
+def fetch_articles_for_dedup_corpus(
+    conn: sqlite3.Connection,
+    *,
+    since_iso: str,
+    limit: int,
+) -> List[sqlite3.Row]:
+    """
+    Compact rows for multi-day dedup: newest first, hard-capped for LLM budget.
+    """
+    cur = conn.execute(
+        """
+        SELECT url, source, title, published_at
+        FROM articles
+        WHERE published_at >= ?
+        ORDER BY published_at DESC
+        LIMIT ?
+        """,
+        (since_iso, limit),
+    )
+    return list(cur.fetchall())
+
+
 def save_sent_email(
     conn: sqlite3.Connection,
     *,

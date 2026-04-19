@@ -283,6 +283,14 @@ MAX_KEYWORD_ALERT_ARTICLES = _int_from_env_or_snapshot(
     32,
 )
 
+# Prune SQLite `articles` rows older than this (days, UTC). LLM dedup index uses DEDUP_CONTEXT_DAYS.
+ARTICLE_RETENTION_DAYS = int(os.getenv("ARTICLE_RETENTION_DAYS", "30"))
+# Compact multi-day dedup context for Claude (titles/URLs from DB). Should be <= retention.
+DEDUP_CONTEXT_DAYS = int(os.getenv("DEDUP_CONTEXT_DAYS", "30"))
+DEDUP_CONTEXT_MAX_ROWS = int(os.getenv("DEDUP_CONTEXT_MAX_ROWS", "3000"))
+DEDUP_TITLE_MAX_CHARS = int(os.getenv("DEDUP_TITLE_MAX_CHARS", "140"))
+DEDUP_CONTEXT_MAX_CHARS = int(os.getenv("DEDUP_CONTEXT_MAX_CHARS", "55000"))
+
 # =========================================================================
 # DATABASE
 # =========================================================================

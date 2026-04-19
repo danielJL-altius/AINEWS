@@ -5,6 +5,12 @@ Run with:
     python dashboard.py
 
 Then open http://localhost:5050 in your browser.
+
+The same app serves Mailgun inbound webhooks:
+    GET  /health
+    POST /webhooks/inbound-email?token=...
+
+Production: gunicorn dashboard:app
 Password is set via DASHBOARD_PASSWORD in .env (default: altius2026).
 """
 
@@ -31,6 +37,7 @@ from config import (
     get_ingest_dashboard_context,
 )
 from src.ingest_settings_io import save_raw
+from src.inbound_routes import inbound_bp
 from src.db import (
     connect,
     create_subscriber,
@@ -45,6 +52,7 @@ from src.db import (
 
 app = Flask(__name__, template_folder="templates")
 app.secret_key = DASHBOARD_SECRET_KEY
+app.register_blueprint(inbound_bp)
 
 # Ensure DB schema exists whether started via gunicorn or directly.
 init_db(DB_PATH)

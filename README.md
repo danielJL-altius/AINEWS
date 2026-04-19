@@ -67,7 +67,7 @@ Or on AWS Lambda + EventBridge with the same cron expression (UTC: `15 12 * * ? 
 ```
 daily_news/
 ├── main.py                 # Orchestrator + CLI
-├── inbound_server.py       # Mailgun inbound webhook (forward-to-ingest)
+├── inbound_server.py       # Optional: inbound-only Flask (use dashboard:app in prod)
 ├── config.py               # API keys, categories, priority companies
 ├── requirements.txt
 ├── .env.example
@@ -77,7 +77,9 @@ daily_news/
 │   ├── generate.py         # Master prompt + Claude call + JSON parsing
 │   ├── markets.py          # Yahoo Finance snapshot
 │   ├── render.py           # Jinja renderer
-│   └── deliver.py          # Mailgun + disk fallback
+│   ├── deliver.py          # Mailgun + disk fallback
+│   ├── inbound_routes.py   # Mailgun webhook blueprint (mounted on dashboard)
+│   └── dedup_archive.py    # Format multi-day title index for LLM dedup
 ├── templates/
 │   ├── email.html.j2       # Mobile-first HTML email
 │   └── email.txt.j2        # Plain-text fallback
@@ -94,11 +96,11 @@ daily_news/
 
 **Debugging a bad output.** Run `python main.py --dry-run --verbose`. The `--skip-ingest` flag is useful when iterating on the prompt — it reuses articles already in the DB instead of re-hitting NewsAPI.ai.
 
-**Dedup behavior.** Yesterday's rendered plain-text email is passed to Claude as context. Claude is instructed to exclude repeat stories unless there's a material new development. The archive lives in the `sent_emails` table.
+**Dedup behavior.** Yesterday's plain-text email is passed to Claude, plus a **compact multi-day index** (title, source, date, URL) built from `articles` for roughly the last **30 days** by default (`DEDUP_CONTEXT_DAYS`). Old article rows are **pruned** after **`ARTICLE_RETENTION_DAYS`** (default 30). Tune `DEDUP_CONTEXT_MAX_ROWS` / `DEDUP_CONTEXT_MAX_CHARS` if Claude hits token limits.
 
 **Paywalls.** For WSJ / FT / Bloomberg, we only get headlines and ~600 chars of body via NewsAPI.ai. That's enough to write a 1–2 sentence summary — recipients click through to read the full article using their own subscription.
 
-**Mailgun.** Outbound uses the Mailgun Messages API (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, optional `MAILGUN_REGION=us|eu`). Inbound forwarding uses Mailgun **Receiving → Routes** to POST to `inbound_server.py` at `/webhooks/inbound-email?token=...` (set `INBOUND_WEBHOOK_SECRET`). Verify DNS (SPF/DKIM) for your sending domain in the Mailgun dashboard.
+**Mailgun.** Outbound uses the Mailgun Messages API (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, optional `MAILGUN_REGION=us|eu`). Inbound forwarding uses Mailgun **Receiving → Routes** to POST to **`/webhooks/inbound-email?token=...`** on the same host as the dashboard (`INBOUND_WEBHOOK_SECRET`). Routes live in `src/inbound_routes.py` and are registered on the combined app. **Production:** `gunicorn dashboard:app` (serves UI + webhook + `GET /health`). Optional second process: `gunicorn inbound_server:app` only if you split services. Verify DNS (SPF/DKIM) for your sending domain in the Mailgun dashboard.
 
 **Dashboard — keywords & ingest.** Run `python dashboard.py` and open **Keywords & ingest** (`/settings`). Edits are saved to `data/ingest_settings.json` (sector keyword seeds, Keyword alerts watchlist, priority companies/tickers, 3G flag names, max Keyword-alert articles). Environment variables `WATCHLIST_KEYWORDS` and `MAX_KEYWORD_ALERT_ARTICLES` still override file values when set. The subscriber page continues to control **which topics** each person receives (toggles on the same category names).
 

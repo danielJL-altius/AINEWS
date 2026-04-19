@@ -3,8 +3,9 @@ Main orchestrator for the Daily News Email.
 
 Pipeline:
   1. ingest_all()     — pull last 24h articles from NewsAPI.ai
+  1b. prune old article rows (default: retain ~30 days)
   2. get_market_snapshot() — pre-market futures/FX/yields/commodities/crypto
-  3. generate_email_content()  — LLM categorization + dedup using Justin's master prompt
+  3. generate_email_content()  — LLM categorization + dedup (yesterday's email + multi-day title index)
   4. render_email()   — HTML + plain-text
   5. send_email()     — Mailgun (or disk fallback)
   6. save_sent_email() — archive for tomorrow's dedup
@@ -21,8 +22,28 @@ import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from config import DB_PATH, LOOKBACK_HOURS, PREFERRED_SOURCES, SOURCE_DISPLAY_NAMES, TIMEZONE
-from src.db import connect, fetch_recent_articles, get_prior_email, init_db, save_sent_email
+from config import (
+    ARTICLE_RETENTION_DAYS,
+    DB_PATH,
+    DEDUP_CONTEXT_DAYS,
+    DEDUP_CONTEXT_MAX_CHARS,
+    DEDUP_CONTEXT_MAX_ROWS,
+    DEDUP_TITLE_MAX_CHARS,
+    LOOKBACK_HOURS,
+    PREFERRED_SOURCES,
+    SOURCE_DISPLAY_NAMES,
+    TIMEZONE,
+)
+from src.dedup_archive import build_dedup_corpus_text
+from src.db import (
+    connect,
+    delete_articles_older_than,
+    fetch_articles_for_dedup_corpus,
+    fetch_recent_articles,
+    get_prior_email,
+    init_db,
+    save_sent_email,
+)
 from src.deliver import deliver_to_subscribers, send_email
 from src.generate import generate_email_content
 from src.ingest import ingest_all
@@ -56,8 +77,41 @@ def run(*, dry_run: bool = False, skip_ingest: bool = False, verbose: bool = Tru
         ingest_summary = ingest_all(DB_PATH, verbose=verbose)
         log.info("Ingestion summary: %s", ingest_summary)
 
+    now_utc = datetime.now(timezone.utc)
+    if DEDUP_CONTEXT_DAYS > ARTICLE_RETENTION_DAYS:
+        log.warning(
+            "DEDUP_CONTEXT_DAYS (%d) > ARTICLE_RETENTION_DAYS (%d) — dedup index may miss older rows",
+            DEDUP_CONTEXT_DAYS,
+            ARTICLE_RETENTION_DAYS,
+        )
+
+    # --- 1b. Prune article archive & load multi-day dedup index ---
+    retention_cutoff = (now_utc - timedelta(days=ARTICLE_RETENTION_DAYS)).isoformat()
+    dedup_since = (now_utc - timedelta(days=DEDUP_CONTEXT_DAYS)).isoformat()
+    dedup_plain = ""
+    with connect(DB_PATH) as conn:
+        pruned = delete_articles_older_than(conn, retention_cutoff)
+        if pruned:
+            log.info("Pruned %d article row(s) older than %s (UTC)", pruned, retention_cutoff[:10])
+        dedup_rows = fetch_articles_for_dedup_corpus(
+            conn,
+            since_iso=dedup_since,
+            limit=DEDUP_CONTEXT_MAX_ROWS,
+        )
+    dedup_plain = build_dedup_corpus_text(
+        dedup_rows,
+        title_max_chars=DEDUP_TITLE_MAX_CHARS,
+        max_total_chars=DEDUP_CONTEXT_MAX_CHARS,
+    )
+    log.info(
+        "Dedup corpus: %d DB rows → %d chars (~last %d days)",
+        len(dedup_rows),
+        len(dedup_plain),
+        DEDUP_CONTEXT_DAYS,
+    )
+
     # --- 2. Pull candidates from DB ---
-    since_utc = (datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)).isoformat()
+    since_utc = (now_utc - timedelta(hours=LOOKBACK_HOURS)).isoformat()
     with connect(DB_PATH) as conn:
         rows = fetch_recent_articles(conn, since_utc)
         prior = get_prior_email(conn, yesterday_date)
@@ -76,6 +130,7 @@ def run(*, dry_run: bool = False, skip_ingest: bool = False, verbose: bool = Tru
         prior_email_plain=(prior["plain"] if prior else None),
         markets=markets,
         today_str=today_str,
+        dedup_corpus_plain=dedup_plain,
     )
 
     # --- 5. Render ---

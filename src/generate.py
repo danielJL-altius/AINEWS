@@ -21,6 +21,7 @@ from anthropic import Anthropic
 from config import (
     ANTHROPIC_API_KEY,
     CATEGORIES,
+    DEDUP_CONTEXT_DAYS,
     FLAG_NAMES_3G,
     LLM_MAX_TOKENS,
     LLM_MODEL,
@@ -82,9 +83,12 @@ Do NOT include mentions of these names based on name alone.
 =============================================================
 DEDUP / REPEAT RULES
 =============================================================
-You will be given yesterday's email as context. Do NOT repeat the same story unless there is a material
-new development (earnings update, deal update, regulatory action, guidance revision, management change,
-financing, etc.). When uncertain, exclude.
+You receive (1) YESTERDAY'S EMAIL (full plain text) for continuity, and (2) a MULTI-DAY ARTICLE INDEX — one line per
+stored article over roughly the last {DEDUP_CONTEXT_DAYS} calendar days (date, source, short title, URL; not full text).
+Use the INDEX as the primary cross-day fingerprint: treat the same corporate event echoed across outlets, reprints,
+or wire pickups as ONE story unless today's candidate clearly adds material facts (earnings revision, new deal terms,
+updated guidance, regulatory action, management/board change, financing tranche, etc.). Do NOT repeat the same story
+unless there is such a material new development. When uncertain, exclude.
 
 =============================================================
 SAME-DAY RULE
@@ -223,9 +227,12 @@ def generate_email_content(
     prior_email_plain: Optional[str],
     markets: Dict[str, str],
     today_str: str,
+    dedup_corpus_plain: str = "",
 ) -> EmailContent:
     """
     Call Claude with Justin's master prompt. Returns a typed EmailContent.
+
+    ``dedup_corpus_plain`` is a compact multi-day title/URL index for cross-day duplicate detection.
     """
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
@@ -233,6 +240,7 @@ def generate_email_content(
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
     wl = ", ".join(WATCHLIST_KEYWORDS) if WATCHLIST_KEYWORDS else "(none — Keyword alerts section only uses (Keyword alerts) candidates if any)"
+    dedup_block = dedup_corpus_plain.strip() if dedup_corpus_plain else "(empty)"
     user_message = f"""TODAY'S DATE (ET): {today_str}
 
 === CONFIGURED WATCHLIST TERMS (Keyword alerts ingestion) ===
@@ -240,6 +248,9 @@ def generate_email_content(
 
 === CANDIDATE ARTICLES (last 24h) ===
 {_format_articles_for_llm(articles)}
+
+=== MULTI-DAY ARTICLE INDEX (approx. last {DEDUP_CONTEXT_DAYS} days — stored titles/URLs for dedup; not full text) ===
+{dedup_block}
 
 === YESTERDAY'S EMAIL (for dedup reference) ===
 {_format_prior_email(prior_email_plain)}
