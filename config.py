@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 # Load .env file if present. Must happen before any os.getenv() calls below.
 try:
@@ -19,11 +18,17 @@ except ImportError:
 
 NEWSAPI_AI_KEY = os.getenv("NEWSAPI_AI_KEY", "e29c75b9-8da8-44a2-8dea-d86db249ddaf")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 
 # =========================================================================
-# EMAIL DELIVERY
+# EMAIL DELIVERY (Mailgun — https://www.mailgun.com/)
 # =========================================================================
+#
+# MAILGUN_DOMAIN: verified sending domain in Mailgun (e.g. mg.example.com).
+# MAILGUN_REGION: "us" (api.mailgun.net) or "eu" (api.eu.mailgun.net).
+
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "").strip()
+MAILGUN_REGION = os.getenv("MAILGUN_REGION", "us").strip().lower()
 
 FROM_EMAIL = os.getenv("FROM_EMAIL", "news@altius.capital")
 FROM_NAME = os.getenv("FROM_NAME", "Altius Daily News")
@@ -40,6 +45,7 @@ CATEGORIES: List[str] = [
     "Footwear / Apparel",
     "Private Equity / Investing",
     "Technology",
+    "Keyword alerts",  # firm / partner / watchlist — configured via WATCHLIST_KEYWORDS
     "Markets",
 ]
 
@@ -109,7 +115,7 @@ FLAG_NAMES_3G: List[str] = [
 # burns 3 tokens. These lists are tuned to stay under the cap.
 # =========================================================================
 
-CATEGORY_KEYWORDS = {
+_SECTOR_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "QSR": [
         "Restaurant Brands",   # 2
         "McDonald's",          # 1
@@ -163,12 +169,40 @@ CATEGORY_KEYWORDS = {
     ],
 }
 
+
+def _parse_watchlist_from_env() -> List[str]:
+    """
+    Comma-separated phrases from WATCHLIST_KEYWORDS.
+    If unset, use conservative defaults (firm + portfolio anchors).
+    Stay within NewsAPI.ai OR-query token limits (~15 word tokens on free tier).
+    """
+    raw = os.getenv("WATCHLIST_KEYWORDS", "").strip()
+    if raw:
+        return [p.strip() for p in raw.split(",") if p.strip()]
+    return [
+        "Altius Capital",
+        "3G Capital",
+        "Restaurant Brands International",
+        "Kraft Heinz",
+    ]
+
+
+# Merged into ingestion: one Event Registry query for watchlist hits (same sources).
+_WATCHLIST = _parse_watchlist_from_env()
+CATEGORY_KEYWORDS: Dict[str, List[str]] = dict(_SECTOR_CATEGORY_KEYWORDS)
+if _WATCHLIST:
+    CATEGORY_KEYWORDS["Keyword alerts"] = _WATCHLIST
+
+# Exposed for prompts so the LLM knows which terms drive this section.
+WATCHLIST_KEYWORDS: List[str] = list(_WATCHLIST)
+
 # =========================================================================
 # INGESTION WINDOW
 # =========================================================================
 
 LOOKBACK_HOURS = 24
 MAX_ARTICLES_PER_CATEGORY = 40
+MAX_KEYWORD_ALERT_ARTICLES = int(os.getenv("MAX_KEYWORD_ALERT_ARTICLES", "32"))
 
 # =========================================================================
 # DATABASE
@@ -193,7 +227,7 @@ TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 # INBOUND EMAIL (forward-to-ingest webhook) — see inbound_server.py
 # =========================================================================
 #
-# SendGrid Inbound Parse posts to /webhooks/inbound-email?token=...
+# Mailgun Routes forward inbound mail to /webhooks/inbound-email?token=...
 # FORWARD_ALLOWED_SENDERS: comma-separated allowlist. Use full email and/or
 # @domain entries (e.g. "alice@firm.com,@client.com"). Empty = allow any
 # sender that presents the webhook secret (use only with HTTPS + secret).

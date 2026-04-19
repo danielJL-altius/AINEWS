@@ -5,7 +5,7 @@ through the same SQLite → LLM pipeline as NewsAPI.ai items.
 Stable primary key: a https://forward.invalid/... URL derived from Message-ID
 when present, else from a hash of from + subject + body.
 
-Designed for SendGrid Inbound Parse (multipart/form POST); see inbound_server.py.
+Designed for Mailgun Routes / inbound webhooks (multipart form POST); see inbound_server.py.
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ def ingest_eml_file(
 ) -> Dict[str, Any]:
     """
     Read a ``.eml`` file from disk and insert it using the same rules as the
-    inbound webhook (for local QA without SendGrid).
+    inbound webhook (for local QA without Mailgun).
     """
     path = Path(eml_path)
     if not path.is_file():

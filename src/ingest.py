@@ -33,6 +33,7 @@ from config import (
     CATEGORY_KEYWORDS,
     LOOKBACK_HOURS,
     MAX_ARTICLES_PER_CATEGORY,
+    MAX_KEYWORD_ALERT_ARTICLES,
     NEWSAPI_AI_KEY,
     PREFERRED_SOURCES,
 )
@@ -144,6 +145,14 @@ def ingest_all(db_path: str, *, verbose: bool = True) -> Dict[str, int]:
     summary: Dict[str, int] = {}
     with connect(db_path) as conn:
         for category, keywords in CATEGORY_KEYWORDS.items():
+            if not keywords:
+                summary[category] = 0
+                continue
+            cap = (
+                min(MAX_ARTICLES_PER_CATEGORY, MAX_KEYWORD_ALERT_ARTICLES)
+                if category == "Keyword alerts"
+                else MAX_ARTICLES_PER_CATEGORY
+            )
             if verbose:
                 log.info("Ingesting category=%s", category)
             articles = ingest_category(
@@ -151,7 +160,7 @@ def ingest_all(db_path: str, *, verbose: bool = True) -> Dict[str, int]:
                 category=category,
                 keywords=keywords,
                 since=since,
-                max_items=MAX_ARTICLES_PER_CATEGORY,
+                max_items=cap,
             )
             for a in articles:
                 upsert_article(

@@ -26,6 +26,7 @@ from config import (
     LLM_MODEL,
     PRIORITY_COMPANIES,
     PRIORITY_TICKERS,
+    WATCHLIST_KEYWORDS,
 )
 
 log = logging.getLogger(__name__)
@@ -48,14 +49,16 @@ Categories (in order):
 3. Footwear / Apparel
 4. Private Equity / Investing
 5. Technology
-6. Markets
+6. Keyword alerts (watchlist mentions — firm names, partners, etc.; see rules below)
+7. Markets
 
 =============================================================
 CONTENT RULES
 =============================================================
 - Use ONLY the candidate articles provided in the user message. Do not invent articles, URLs, or quotes.
 - Candidates tagged \"User forwarded\" are email the user forwarded into this system; use the snippet as the article text and keep the URL exactly as given (it may be a non-web identifier).
-- Maximum 8 bullets per category.
+- KEYWORD ALERTS — Use ONLY candidates whose category line shows (Keyword alerts). Those articles were retrieved because the headline/body matched the firm's configured watchlist terms listed in the user message. Do not move sector stories into this section unless they also appear with (Keyword alerts). If a (Keyword alerts) story is redundant with a bullet already used above, include it at most once (prefer the sector category) and omit the duplicate from Keyword alerts.
+- Maximum 8 bullets per category (Markets uses market_snapshot, not bullets).
 - Each bullet is a 1–2 sentence business-prose summary of a single news item.
 - One idea per bullet. No italics. No editorializing. No opinion pieces.
 - For EVERY bullet (except Markets), include the source name and article URL exactly as provided — never fabricate.
@@ -126,6 +129,17 @@ OUTPUT FORMAT (STRICT JSON)
     {{"name": "Footwear / Apparel", "bullets": [...]}},
     {{"name": "Private Equity / Investing", "bullets": [...]}},
     {{"name": "Technology", "bullets": [...]}},
+    {{
+      "name": "Keyword alerts",
+      "bullets": [
+        {{
+          "text": "Summary — emphasize why the watchlist term appears (deal, quote, regulatory mention, etc.).",
+          "implication": "optional",
+          "source": "Bloomberg",
+          "url": "https://..."
+        }}
+      ]
+    }},
     {{
       "name": "Markets",
       "market_snapshot": {{
@@ -218,7 +232,11 @@ def generate_email_content(
 
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
+    wl = ", ".join(WATCHLIST_KEYWORDS) if WATCHLIST_KEYWORDS else "(none — Keyword alerts section only uses (Keyword alerts) candidates if any)"
     user_message = f"""TODAY'S DATE (ET): {today_str}
+
+=== CONFIGURED WATCHLIST TERMS (Keyword alerts ingestion) ===
+{wl}
 
 === CANDIDATE ARTICLES (last 24h) ===
 {_format_articles_for_llm(articles)}

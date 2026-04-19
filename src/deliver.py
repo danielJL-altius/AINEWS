@@ -1,5 +1,5 @@
 """
-Email delivery via SendGrid.
+Email delivery via Mailgun (HTTPS API).
 
 send_email()            — low-level: send to an explicit list of addresses.
 deliver_to_subscribers() — high-level: load active subscribers from the DB,
@@ -11,9 +11,12 @@ deliver_to_subscribers() — high-level: load active subscribers from the DB,
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import logging
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import List, Optional
@@ -22,49 +25,72 @@ from config import (
     DB_PATH,
     FROM_EMAIL,
     FROM_NAME,
+    MAILGUN_API_KEY,
+    MAILGUN_DOMAIN,
+    MAILGUN_REGION,
     REPLY_TO,
-    SENDGRID_API_KEY,
     TO_EMAILS,
 )
 
 log = logging.getLogger(__name__)
 
 
-# =========================================================================
-# LOW-LEVEL SENDGRID SEND
-# =========================================================================
+def _mailgun_messages_url() -> str:
+    base = (
+        "https://api.eu.mailgun.net/v3"
+        if MAILGUN_REGION == "eu"
+        else "https://api.mailgun.net/v3"
+    )
+    return f"{base}/{MAILGUN_DOMAIN}/messages"
 
-def _send_via_sendgrid(
+
+def _send_via_mailgun(
     *,
     subject: str,
     html: str,
     plain: str,
     to_emails: List[str],
 ) -> bool:
-    payload = {
-        "personalizations": [{"to": [{"email": e} for e in to_emails]}],
-        "from": {"email": FROM_EMAIL, "name": FROM_NAME},
-        "reply_to": {"email": REPLY_TO},
-        "subject": subject,
-        "content": [
-            {"type": "text/plain", "value": plain},
-            {"type": "text/html", "value": html},
-        ],
-    }
+    if not MAILGUN_DOMAIN:
+        log.error("MAILGUN_DOMAIN is not set")
+        return False
+
+    auth = base64.b64encode(f"api:{MAILGUN_API_KEY}".encode()).decode()
+    data = urllib.parse.urlencode(
+        {
+            "from": f"{FROM_NAME} <{FROM_EMAIL}>",
+            "to": ", ".join(to_emails),
+            "subject": subject,
+            "text": plain,
+            "html": html,
+            "h:Reply-To": REPLY_TO,
+        },
+        doseq=False,
+    ).encode("utf-8")
+
     req = urllib.request.Request(
-        "https://api.sendgrid.com/v3/mail/send",
-        data=json.dumps(payload).encode("utf-8"),
+        _mailgun_messages_url(),
+        data=data,
         headers={
-            "Authorization": f"Bearer {SENDGRID_API_KEY}",
-            "Content-Type": "application/json",
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        if 200 <= r.status < 300:
-            log.info("SendGrid accepted email for %d recipient(s)", len(to_emails))
-            return True
-        log.error("SendGrid returned %s: %s", r.status, r.read()[:500])
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read()[:500]
+            if 200 <= r.status < 300:
+                log.info("Mailgun accepted email for %d recipient(s)", len(to_emails))
+                return True
+            log.error("Mailgun returned %s: %s", r.status, body)
+            return False
+    except urllib.error.HTTPError as e:
+        err = e.read()[:800] if e.fp else b""
+        log.error("Mailgun HTTP %s: %s", e.code, err.decode("utf-8", errors="replace"))
+        return False
+    except OSError as e:
+        log.error("Mailgun request failed: %s", e)
         return False
 
 
@@ -77,21 +103,26 @@ def send_email(
     fallback_dir: str = "data/sent",
 ) -> bool:
     """
-    Send the email. If SENDGRID_API_KEY is missing, write to disk instead.
+    Send the email. If MAILGUN_API_KEY or MAILGUN_DOMAIN is missing, write to disk instead.
     """
     recipients = to_emails or TO_EMAILS
 
-    if not SENDGRID_API_KEY:
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         out = Path(fallback_dir)
         out.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
+
         stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%SZ")
         (out / f"{stamp}.html").write_text(html, encoding="utf-8")
         (out / f"{stamp}.txt").write_text(plain, encoding="utf-8")
-        log.info("SENDGRID_API_KEY missing — wrote email to %s/%s.*", out, stamp)
+        log.info(
+            "MAILGUN_API_KEY or MAILGUN_DOMAIN missing — wrote email to %s/%s.*",
+            out,
+            stamp,
+        )
         return True
 
-    return _send_via_sendgrid(
+    return _send_via_mailgun(
         subject=subject, html=html, plain=plain, to_emails=recipients
     )
 

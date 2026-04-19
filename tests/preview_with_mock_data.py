@@ -129,6 +129,17 @@ def build_mock() -> EmailContent:
                 ],
             ),
             CategorySection(
+                name="Keyword alerts",
+                bullets=[
+                    Bullet(
+                        text="Altius Capital was cited in coverage of cross-border PE secondaries as LPs rotate out of legacy vintage funds.",
+                        implication="Raises visibility on firm brand; limited read-through to portfolio ops.",
+                        source="Reuters",
+                        url="https://www.reuters.com/business/altius-secondaries-2026-04-17",
+                    ),
+                ],
+            ),
+            CategorySection(
                 name="Markets",
                 market_snapshot={
                     "equity_futures": "S&P: 5,842.25 ▲ +0.32%; Nasdaq: 20,115.50 ▲ +0.41%; Dow: 42,890.00 ▲ +0.21%",

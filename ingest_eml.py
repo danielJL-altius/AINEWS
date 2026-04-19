@@ -2,7 +2,7 @@
 """
 Ingest a saved ``.eml`` file into the news database as a \"User forwarded\" article.
 
-Uses the same logic as the SendGrid inbound webhook (see inbound_server.py).
+Uses the same logic as the Mailgun inbound webhook (see inbound_server.py).
 
 Examples::
 

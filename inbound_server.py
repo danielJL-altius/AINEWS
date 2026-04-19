@@ -1,8 +1,10 @@
 """
-HTTP endpoint for SendGrid Inbound Parse (or compatible multipart POST).
+HTTP endpoint for inbound email webhooks (Mailgun Routes primary).
 
-Configure SendGrid: Settings → Inbound Parse → hostname → POST URL:
+Mailgun: Receiving → Routes → forward to:
   https://your-host/webhooks/inbound-email?token=YOUR_SECRET
+
+(SendGrid Inbound Parse field names are also accepted for compatibility.)
 
 Set INBOUND_WEBHOOK_SECRET in .env to match YOUR_SECRET.
 
@@ -18,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from typing import Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -41,6 +44,42 @@ def _check_token() -> None:
         abort(401)
 
 
+def _extract_inbound_parts() -> Tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+    """
+    Normalize Mailgun and SendGrid inbound POST bodies to a common shape.
+
+    Mailgun: from, sender, subject, stripped-text, body-plain, stripped-html,
+             body-html, message-headers
+    SendGrid: from, subject, text, html, headers
+    """
+    f = request.form
+    from_hdr = (f.get("from") or f.get("From") or "").strip()
+    if not from_hdr:
+        from_hdr = (f.get("sender") or "").strip()
+
+    subject = (f.get("subject") or "").strip()
+
+    text = (
+        f.get("stripped-text")
+        or f.get("body-plain")
+        or f.get("text")
+    )
+    if text is not None:
+        text = text.strip() or None
+
+    html = (
+        f.get("stripped-html")
+        or f.get("body-html")
+        or f.get("html")
+    )
+    if html is not None:
+        html = html.strip() or None
+
+    headers = f.get("message-headers") or f.get("headers")
+
+    return from_hdr, subject, text, html, headers
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -48,17 +87,9 @@ def health():
 
 @app.post("/webhooks/inbound-email")
 def inbound_email():
-    """
-    SendGrid Inbound Parse posts multipart/form-data with at least:
-      from, to, subject, text, html, headers (sometimes), envelope, etc.
-    """
     _check_token()
 
-    from_hdr = request.form.get("from", "") or ""
-    subject = request.form.get("subject", "") or ""
-    text = request.form.get("text")
-    html = request.form.get("html")
-    headers = request.form.get("headers")
+    from_hdr, subject, text, html, headers = _extract_inbound_parts()
 
     allowlist = parse_allowlist_csv(FORWARD_ALLOWED_SENDERS)
     result = ingest_forward_email(
@@ -72,7 +103,7 @@ def inbound_email():
     )
     if not result.get("ok"):
         log.info("Inbound not stored: %s", result.get("error"))
-    # Always 200 after auth so SendGrid stops retrying; body carries ok/error.
+    # 200 so Mailgun does not retry indefinitely on business-rule skips.
     return jsonify(result), 200
 
 

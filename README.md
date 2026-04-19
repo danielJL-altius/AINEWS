@@ -24,7 +24,7 @@ Generates the Daily News Brief described in Justin Fox's (3G Capital) master pro
                        └──────────────┘                │
                                                        ▼
                                               ┌─────────────┐
-                                              │  SendGrid   │
+                                              │  Mailgun    │
                                               └─────────────┘
 ```
 
@@ -38,7 +38,7 @@ pip install -r requirements.txt
 
 # 2. Configure
 cp .env.example .env
-# edit .env and add your ANTHROPIC_API_KEY (and SENDGRID_API_KEY if sending)
+# edit .env and add your ANTHROPIC_API_KEY, MAILGUN_API_KEY, MAILGUN_DOMAIN (if sending)
 
 # 3. Preview without sending
 python main.py --dry-run --verbose
@@ -67,6 +67,7 @@ Or on AWS Lambda + EventBridge with the same cron expression (UTC: `15 12 * * ? 
 ```
 daily_news/
 ├── main.py                 # Orchestrator + CLI
+├── inbound_server.py       # Mailgun inbound webhook (forward-to-ingest)
 ├── config.py               # API keys, categories, priority companies
 ├── requirements.txt
 ├── .env.example
@@ -76,7 +77,7 @@ daily_news/
 │   ├── generate.py         # Master prompt + Claude call + JSON parsing
 │   ├── markets.py          # Yahoo Finance snapshot
 │   ├── render.py           # Jinja renderer
-│   └── deliver.py          # SendGrid + disk fallback
+│   └── deliver.py          # Mailgun + disk fallback
 ├── templates/
 │   ├── email.html.j2       # Mobile-first HTML email
 │   └── email.txt.j2        # Plain-text fallback
@@ -96,6 +97,8 @@ daily_news/
 **Dedup behavior.** Yesterday's rendered plain-text email is passed to Claude as context. Claude is instructed to exclude repeat stories unless there's a material new development. The archive lives in the `sent_emails` table.
 
 **Paywalls.** For WSJ / FT / Bloomberg, we only get headlines and ~600 chars of body via NewsAPI.ai. That's enough to write a 1–2 sentence summary — recipients click through to read the full article using their own subscription.
+
+**Mailgun.** Outbound uses the Mailgun Messages API (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, optional `MAILGUN_REGION=us|eu`). Inbound forwarding uses Mailgun **Receiving → Routes** to POST to `inbound_server.py` at `/webhooks/inbound-email?token=...` (set `INBOUND_WEBHOOK_SECRET`). Verify DNS (SPF/DKIM) for your sending domain in the Mailgun dashboard.
 
 ## Known limitations (v1)
 

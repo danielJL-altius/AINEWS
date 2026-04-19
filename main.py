@@ -6,7 +6,7 @@ Pipeline:
   2. get_market_snapshot() — pre-market futures/FX/yields/commodities/crypto
   3. generate_email_content()  — LLM categorization + dedup using Justin's master prompt
   4. render_email()   — HTML + plain-text
-  5. send_email()     — SendGrid (or disk fallback)
+  5. send_email()     — Mailgun (or disk fallback)
   6. save_sent_email() — archive for tomorrow's dedup
 
 Run manually with `python main.py` or schedule via cron at ~07:15 ET.

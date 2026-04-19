@@ -63,11 +63,28 @@ CREATE TABLE IF NOT EXISTS subscriber_prefs (
 """
 
 
+def _ensure_subscriber_topic_rows(conn: sqlite3.Connection) -> None:
+    """Insert missing topic preference rows when CATEGORIES grows (e.g. Keyword alerts)."""
+    from config import CATEGORIES
+
+    for row in conn.execute("SELECT email FROM subscribers"):
+        email = row["email"]
+        for topic in CATEGORIES:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO subscriber_prefs (email, pref_type, pref_value, enabled)
+                VALUES (?, 'topic', ?, 1)
+                """,
+                (email, topic),
+            )
+
+
 def init_db(db_path: str) -> None:
     """Create the database file and schema if they don't exist."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _ensure_subscriber_topic_rows(conn)
         conn.commit()
 
 
