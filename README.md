@@ -28,7 +28,32 @@ Generates the Daily News Brief described in Justin Fox's (3G Capital) master pro
                                               └─────────────┘
 ```
 
-The pipeline runs every morning. Claude applies Justin's master prompt verbatim (adapted to return JSON so the email template is deterministic), using yesterday's email for dedup context and a pre-market snapshot for the Markets section.
+The pipeline runs every morning. Claude applies Justin's master prompt verbatim (adapted to return JSON so the email template is deterministic), using **two kinds of dedup context** (see [Uniqueness & deduplication](#uniqueness--deduplication)) plus a pre-market snapshot for the Markets section.
+
+## Uniqueness & deduplication
+
+The product goal is a briefing that feels **fresh day to day**: the same corporate event echoed across wires and outlets should not fill the digest as if it were multiple distinct stories, and stories already covered recently should not reappear unless there is **materially new** information.
+
+**How it works (no separate duplicate-detection service).** Uniqueness is enforced by **prompt rules** plus **context** passed into the model:
+
+1. **Yesterday’s email (full plain text)** — Loaded from the `sent_emails` table so Claude sees exactly what subscribers received the prior trading day (continuity and phrasing).
+2. **Multi-day Article Index** — A compact, one-line-per-row fingerprint of articles already stored in SQLite: `date | source | title (truncated) | url`, covering roughly the last `DEDUP_CONTEXT_DAYS` calendar days (newest first). Built in `src/dedup_archive.py` from rows returned by `fetch_articles_for_dedup_corpus` in `src/db.py`. This index is the primary **cross-day** signal for “we already saw this story.”
+
+**Model instructions** (`SYSTEM_PROMPT` in `src/generate.py`): treat the index as the main fingerprint; treat the same event across outlets as **one** story unless today’s article clearly adds material facts (e.g. revised guidance, new deal terms, regulatory action). If uncertain, **exclude**. Separately, the **same-day rule** restricts candidate bullets to articles whose **published date is today (ET)** so stale items are not recycled.
+
+**Data lifecycle:** After ingest, rows in `articles` older than `ARTICLE_RETENTION_DAYS` are **pruned** so the archive stays bounded. The dedup index window should stay within retention (`DEDUP_CONTEXT_DAYS` ≤ `ARTICLE_RETENTION_DAYS`); if misconfigured, the app logs a warning. After a successful send, the run is **archived** to `sent_emails` so the next run has “yesterday’s email.”
+
+**Tuning (environment variables, defaults in `config.py`):**
+
+| Variable | Role |
+|----------|------|
+| `ARTICLE_RETENTION_DAYS` | Delete `articles` rows older than this many days (UTC). Default `30`. |
+| `DEDUP_CONTEXT_DAYS` | How far back the title/URL index reaches. Default `30`. Should be ≤ retention. |
+| `DEDUP_CONTEXT_MAX_ROWS` | Hard cap on rows in the index (LLM budget). Default `3000`. |
+| `DEDUP_TITLE_MAX_CHARS` | Max characters per title line in the index. Default `140`. |
+| `DEDUP_CONTEXT_MAX_CHARS` | Max total size of the index blob. Default `55000`. |
+
+See `.env.example` for copy-paste names. If Claude hits token limits, lower `DEDUP_CONTEXT_MAX_CHARS` and/or `DEDUP_CONTEXT_MAX_ROWS` before shrinking the calendar window.
 
 ## Setup
 
@@ -96,7 +121,7 @@ daily_news/
 
 **Debugging a bad output.** Run `python main.py --dry-run --verbose`. The `--skip-ingest` flag is useful when iterating on the prompt — it reuses articles already in the DB instead of re-hitting NewsAPI.ai.
 
-**Dedup behavior.** Yesterday's plain-text email is passed to Claude, plus a **compact multi-day index** (title, source, date, URL) built from `articles` for roughly the last **30 days** by default (`DEDUP_CONTEXT_DAYS`). Old article rows are **pruned** after **`ARTICLE_RETENTION_DAYS`** (default 30). Tune `DEDUP_CONTEXT_MAX_ROWS` / `DEDUP_CONTEXT_MAX_CHARS` if Claude hits token limits.
+**Dedup / uniqueness.** See [Uniqueness & deduplication](#uniqueness--deduplication).
 
 **Paywalls.** For WSJ / FT / Bloomberg, we only get headlines and ~600 chars of body via NewsAPI.ai. That's enough to write a 1–2 sentence summary — recipients click through to read the full article using their own subscription.
 
@@ -110,6 +135,7 @@ daily_news/
 - **Markets data is basic.** Yahoo Finance gives quotes, not commentary. The "Movers" field is populated by the LLM from candidate articles, not from a real movers feed.
 - **No link health check.** We don't verify URLs resolve before shipping. Add a HEAD-check pass in `generate.py` if this becomes an issue.
 - **Single recipient rendering.** All recipients get the same email. For per-person personalization (e.g., different priority company lists), extend `main.py` to loop per recipient.
+- **Dedup is LLM-mediated.** There is no post-pass that drops duplicate URLs; quality depends on the index + prompt and model behavior.
 
 ## What to build next (v2)
 
