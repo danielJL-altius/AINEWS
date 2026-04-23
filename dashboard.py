@@ -16,14 +16,18 @@ Password is set via DASHBOARD_PASSWORD in .env (default: altius2026).
 
 from __future__ import annotations
 
-import sys
+import logging
 import os
+import sys
+import threading
+import traceback
+from datetime import datetime, timezone
 
 # Ensure the project root is on the path when running as a script.
 sys.path.insert(0, os.path.dirname(__file__))
 
 from functools import wraps
-from typing import List
+from typing import Any, Dict, List
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
@@ -60,6 +64,44 @@ app.register_blueprint(inbound_bp)
 
 # Ensure DB schema exists whether started via gunicorn or directly.
 init_db(DB_PATH)
+
+log = logging.getLogger(__name__)
+
+# Background daily-brief run (same as `python main.py --dry-run`) — for Railway
+# when no archive exists yet. Does not email subscribers; still saves to sent_emails.
+_brief_lock = threading.Lock()
+_brief_state: Dict[str, Any] = {
+    "running": False,
+    "last_started": None,  # ISO UTC
+    "last_finished": None,
+    "last_error": None,  # traceback tail
+}
+
+
+def _brief_state_snapshot() -> Dict[str, Any]:
+    with _brief_lock:
+        return {**_brief_state}
+
+
+def _brief_worker(skip_ingest: bool) -> None:
+    import main as main_orchestrator
+
+    try:
+        rc = main_orchestrator.run(dry_run=True, skip_ingest=skip_ingest, verbose=True)
+        if rc != 0:
+            raise RuntimeError(f"Pipeline exited with code {rc}")
+        with _brief_lock:
+            _brief_state["last_finished"] = datetime.now(timezone.utc).isoformat()
+            _brief_state["last_error"] = None
+        log.info("Background brief run finished successfully")
+    except Exception:
+        err = f"{traceback.format_exc()}"
+        log.error("Background brief run failed: %s", err[-2000:])
+        with _brief_lock:
+            _brief_state["last_error"] = err[-8000:]
+    finally:
+        with _brief_lock:
+            _brief_state["running"] = False
 
 
 # =========================================================================
@@ -154,7 +196,34 @@ def index():
         subscribers=subscribers,
         sent_archives=sent_archives,
         inbound_log=inbound_log,
+        brief_state=_brief_state_snapshot(),
     )
+
+
+@app.route("/run-brief", methods=["POST"])
+@login_required
+def run_brief_now():
+    """
+    Run the full daily pipeline in the background (ingest → LLM → render).
+    Same as `python main.py --dry-run`: does not email subscribers, but archives
+    to `sent_emails` so "Send test email" works on Railway.
+    """
+    skip_ingest = bool(request.form.get("skip_ingest"))
+
+    with _brief_lock:
+        if _brief_state["running"]:
+            flash("A brief is already generating — wait for it to finish, then refresh.")
+            return redirect(url_for("index"))
+        _brief_state["running"] = True
+        _brief_state["last_started"] = datetime.now(timezone.utc).isoformat()
+
+    t = threading.Thread(target=_brief_worker, args=(skip_ingest,), daemon=True)
+    t.start()
+    flash(
+        "Brief run started (ingest + LLM + archive). "
+        "This usually takes a few minutes — refresh until the archive appears, then use Send test email.",
+    )
+    return redirect(url_for("index"))
 
 
 @app.route("/send-test", methods=["POST"])
@@ -183,8 +252,8 @@ def send_test_email():
 
     if not row:
         flash(
-            "No archived brief found — run the daily job at least once so a send is stored, "
-            "or run `python main.py --dry-run` locally to generate a preview.",
+            "No archived brief yet — use “Generate & archive daily brief” above (runs on the server), "
+            "or run `python main.py --dry-run` locally.",
         )
         return redirect(url_for("index"))
 

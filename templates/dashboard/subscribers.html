@@ -12,6 +12,47 @@
   <p class="subtitle">Manage who receives the morning brief and configure their topic &amp; source preferences.</p>
 </div>
 
+{% set bs = brief_state|default({}) %}
+{% if bs.get('last_error') %}
+<div class="add-card" style="margin-bottom: 16px; border-color: rgba(224,64,64,0.35); background: var(--red-bg);">
+  <div class="add-card-title" style="color: var(--red);">Last brief run failed</div>
+  <pre style="font-size: 10px; color: var(--text-muted); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; margin: 0;">{{ bs['last_error'] }}</pre>
+</div>
+{% endif %}
+
+{% if bs.get('running') %}
+<div class="add-card" style="margin-bottom: 16px; border-color: rgba(200,148,58,0.4);">
+  <div class="add-card-title" style="color: var(--accent);">Generating brief…</div>
+  <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+    Started {{ (bs.get('last_started') or '')[:19] }}Z — refresh this page in a few minutes. Subscribers are <strong>not</strong> emailed (same as <code style="color: var(--accent);">main.py --dry-run</code>).
+  </p>
+</div>
+{% elif bs.get('last_finished') %}
+<p style="font-size: 11px; color: var(--green); margin-bottom: 16px; font-family: var(--font-mono);">
+  Last server brief run finished {{ bs['last_finished'][:19] }}Z
+</p>
+{% endif %}
+
+<!-- Generate archive (on-server dry-run) -->
+<div class="add-card" style="margin-bottom: 24px;">
+  <div class="add-card-title">Generate &amp; archive daily brief</div>
+  <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px; max-width: 720px;">
+    Runs the full pipeline on this server: NewsAPI ingest (optional), market snapshot, Claude, then saves HTML to the archive (and writes <code style="color: var(--accent);">data/preview/</code>).
+    Does <strong>not</strong> send the brief to subscribers — use <em>Send test email</em> below to mail yourself a <code style="color: var(--accent);">[TEST]</code> copy. Use this when Railway has an empty database or you need a fresh archive.
+  </p>
+  <form method="POST" action="/run-brief">
+    <div class="form-row" style="align-items: center; gap: 16px; flex-wrap: wrap;">
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); cursor: pointer; user-select: none;">
+        <input type="checkbox" name="skip_ingest" value="1" style="width: 16px; height: 16px;" />
+        Skip NewsAPI ingest (use articles already in the DB — faster if you hit rate limits)
+      </label>
+      <button type="submit" class="btn btn-primary" {% if bs.get('running') %}disabled{% endif %}>
+        Run now
+      </button>
+    </div>
+  </form>
+</div>
+
 <!-- Send test email (archived brief) -->
 <div class="add-card" style="margin-bottom: 24px;">
   <div class="add-card-title">Send test email</div>
@@ -40,7 +81,7 @@
   </form>
   {% if not (sent_archives|default([])) %}
   <p style="font-size: 11px; color: var(--text-dim); margin-top: 12px; font-family: var(--font-mono);">
-    No archives yet. After the first production send (or a local dry-run that saves to the DB), pick a version here.
+    No archives yet — run <strong>Generate &amp; archive daily brief</strong> above first, then refresh.
   </p>
   {% endif %}
 </div>
