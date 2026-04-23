@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 from flask import Blueprint, abort, jsonify, request
 
 from config import DB_PATH, INBOUND_WEBHOOK_SECRET, FORWARD_ALLOWED_SENDERS
+from src.db import append_inbound_mail_log, connect, init_db
 from src.forward_ingest import ingest_forward_email, parse_allowlist_csv
 
 log = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ def health():
 @inbound_bp.post("/webhooks/inbound-email")
 def inbound_email():
     _check_token()
+    init_db(DB_PATH)  # ensure inbound_mail_log exists (first webhook or standalone inbound server)
 
     from_hdr, subject, text, html, headers = _extract_inbound_parts()
 
@@ -88,4 +90,19 @@ def inbound_email():
     )
     if not result.get("ok"):
         log.info("Inbound not stored: %s", result.get("error"))
+
+    try:
+        with connect(DB_PATH) as conn:
+            append_inbound_mail_log(
+                conn,
+                from_header=from_hdr,
+                subject=subject,
+                ok=bool(result.get("ok")),
+                error=result.get("error"),
+                article_url=result.get("url"),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Could not append inbound_mail_log: %s", e)
+
     return jsonify(result), 200

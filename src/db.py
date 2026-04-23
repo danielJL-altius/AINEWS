@@ -60,6 +60,19 @@ CREATE TABLE IF NOT EXISTS subscriber_prefs (
     enabled     INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (email, pref_type, pref_value)
 );
+
+CREATE TABLE IF NOT EXISTS inbound_mail_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    received_at   TEXT NOT NULL,
+    from_header   TEXT,
+    subject       TEXT,
+    ok            INTEGER NOT NULL,
+    error         TEXT,
+    article_url   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_mail_received
+    ON inbound_mail_log (received_at DESC);
 """
 
 
@@ -220,6 +233,71 @@ def get_prior_email(
         (prior_date,),
     )
     return cur.fetchone()
+
+
+def list_sent_emails_recent(conn: sqlite3.Connection, *, limit: int = 30) -> List[sqlite3.Row]:
+    """Most recent archived briefs (newest first)."""
+    return list(
+        conn.execute(
+            """
+            SELECT sent_date, subject, created_at
+            FROM sent_emails
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    )
+
+
+def get_sent_email_full(conn: sqlite3.Connection, sent_date: str) -> Optional[sqlite3.Row]:
+    """Full row including html/plain for a given trading-day key."""
+    cur = conn.execute(
+        "SELECT sent_date, subject, html, plain, urls_json, created_at FROM sent_emails WHERE sent_date = ?",
+        (sent_date,),
+    )
+    return cur.fetchone()
+
+
+def append_inbound_mail_log(
+    conn: sqlite3.Connection,
+    *,
+    from_header: str,
+    subject: str,
+    ok: bool,
+    error: Optional[str] = None,
+    article_url: Optional[str] = None,
+) -> None:
+    """Record one inbound webhook attempt (success or failure) for the dashboard."""
+    conn.execute(
+        """
+        INSERT INTO inbound_mail_log (received_at, from_header, subject, ok, error, article_url)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.utcnow().isoformat() + "Z",
+            (from_header or "")[:500],
+            (subject or "")[:500],
+            1 if ok else 0,
+            (error or None)[:500] if error else None,
+            (article_url or None)[:500] if article_url else None,
+        ),
+    )
+
+
+def list_inbound_mail_log(conn: sqlite3.Connection, *, limit: int = 100) -> List[sqlite3.Row]:
+    """Newest inbound webhook events first."""
+    return list(
+        conn.execute(
+            """
+            SELECT id, received_at, from_header, subject, ok, error, article_url
+            FROM inbound_mail_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    )
 
 
 # =========================================================================

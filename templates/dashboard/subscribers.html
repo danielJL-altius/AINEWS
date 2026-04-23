@@ -12,6 +12,91 @@
   <p class="subtitle">Manage who receives the morning brief and configure their topic &amp; source preferences.</p>
 </div>
 
+<!-- Send test email (archived brief) -->
+<div class="add-card" style="margin-bottom: 24px;">
+  <div class="add-card-title">Send test email</div>
+  <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px; max-width: 640px;">
+    Delivers a <strong style="color: var(--text);">[TEST]</strong> copy of a saved daily brief to any address — same HTML and plain text as production, so you can check rendering in your inbox and confirm forwards.
+  </p>
+  <form method="POST" action="/send-test">
+    <div class="form-row" style="flex-wrap: wrap; align-items: flex-end; gap: 12px;">
+      <div class="form-group" style="min-width: 200px; flex: 1;">
+        <label class="form-label" for="test_email">Send to</label>
+        <input class="form-input" type="email" id="test_email" name="test_email" placeholder="you@example.com" required />
+      </div>
+      <div class="form-group" style="min-width: 220px; flex: 1;">
+        <label class="form-label" for="sent_date">Which brief</label>
+        <select class="form-input" id="sent_date" name="sent_date" style="padding: 9px 12px; cursor: pointer;">
+          <option value="">Latest archived</option>
+          {% for a in sent_archives|default([]) %}
+            <option value="{{ a['sent_date'] }}">{{ a['sent_date'] }} — {{ (a['subject']|default(''))[:64] }}{% if (a['subject']|default('', true)|length) > 64 %}…{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary">Send test</button>
+      </div>
+    </div>
+  </form>
+  {% if not (sent_archives|default([])) %}
+  <p style="font-size: 11px; color: var(--text-dim); margin-top: 12px; font-family: var(--font-mono);">
+    No archives yet. After the first production send (or a local dry-run that saves to the DB), pick a version here.
+  </p>
+  {% endif %}
+</div>
+
+<!-- Inbound forward log (Mailgun webhook) -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+    <span class="card-title">Inbound — forwarded emails</span>
+    <span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">
+      Each row is a POST to your <code style="color: var(--accent);">/webhooks/inbound-email</code> route. Rejected webhooks (allowlist, empty body) still appear so you can verify Mailgun is hitting the app.
+    </span>
+  </div>
+  {% if inbound_log|default([]) %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Received</th>
+        <th>From / Subject</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ev in inbound_log %}
+      <tr>
+        <td>
+          <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ (ev['received_at'] or '')[:19] }}{% if ev['received_at'] %}Z{% else %}—{% endif %}</span>
+        </td>
+        <td>
+          <div class="sub-name" style="font-size: 12px;">{{ (ev['from_header'] or '—')[:80] }}{% if (ev['from_header']|default('', true)|length) > 80 %}…{% endif %}</div>
+          <div class="sub-email" style="font-size: 11px; margin-top: 2px;">{{ (ev['subject'] or '(no subject)')[:100] }}{% if (ev['subject']|default('', true)|length) > 100 %}…{% endif %}</div>
+        </td>
+        <td>
+          {% if ev['ok'] %}
+            <span class="badge badge-active">Ingested</span>
+            {% if ev['article_url'] %}
+              <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px; max-width: 200px; word-break: break-all;">{{ (ev['article_url']|default(''))[:64] }}{% if (ev['article_url']|default('', true)|length) > 64 %}…{% endif %}</div>
+            {% endif %}
+          {% else %}
+            <span class="badge badge-inactive">Rejected</span>
+            <div style="font-size: 10px; color: var(--red); margin-top: 4px; max-width: 220px;">{{ ev['error'] or 'error' }}</div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding: 32px 20px;">
+    <p style="max-width: 480px; margin: 0 auto; line-height: 1.6;">
+      No inbound events logged yet. When you configure Mailgun to POST to
+      <code style="color: var(--accent);">…/webhooks/inbound-email?token=…</code>, each received forward appears here.
+    </p>
+  </div>
+  {% endif %}
+</div>
+
 <div class="stat-row">
   <div class="stat">
     <span class="stat-value">{{ active_count }}</span>

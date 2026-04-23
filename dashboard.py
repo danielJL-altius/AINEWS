@@ -43,12 +43,16 @@ from src.db import (
     create_subscriber,
     delete_subscriber,
     get_all_subscribers,
+    get_sent_email_full,
     get_subscriber,
     get_subscriber_prefs,
     init_db,
+    list_inbound_mail_log,
+    list_sent_emails_recent,
     set_subscriber_prefs,
     upsert_subscriber,
 )
+from src.deliver import send_email
 
 app = Flask(__name__, template_folder="templates")
 app.secret_key = DASHBOARD_SECRET_KEY
@@ -143,7 +147,59 @@ def logout():
 def index():
     with connect(DB_PATH) as conn:
         subscribers = get_all_subscribers(conn)
-    return render_template("dashboard/subscribers.html", subscribers=subscribers)
+        sent_archives = list_sent_emails_recent(conn, limit=30)
+        inbound_log = list_inbound_mail_log(conn, limit=80)
+    return render_template(
+        "dashboard/subscribers.html",
+        subscribers=subscribers,
+        sent_archives=sent_archives,
+        inbound_log=inbound_log,
+    )
+
+
+@app.route("/send-test", methods=["POST"])
+@login_required
+def send_test_email():
+    """
+    Send a copy of an archived daily brief to a single address for format QA.
+    Subject is prefixed with [TEST].
+    """
+    addr = request.form.get("test_email", "").strip().lower()
+    sent_date = request.form.get("sent_date", "").strip()
+
+    if not addr or "@" not in addr:
+        flash("Enter a valid email address.")
+        return redirect(url_for("index"))
+
+    with connect(DB_PATH) as conn:
+        if sent_date:
+            row = get_sent_email_full(conn, sent_date)
+        else:
+            recent = list_sent_emails_recent(conn, limit=1)
+            if not recent:
+                row = None
+            else:
+                row = get_sent_email_full(conn, recent[0]["sent_date"])
+
+    if not row:
+        flash(
+            "No archived brief found — run the daily job at least once so a send is stored, "
+            "or run `python main.py --dry-run` locally to generate a preview.",
+        )
+        return redirect(url_for("index"))
+
+    test_subject = f"[TEST] {row['subject']}"
+    ok = send_email(
+        subject=test_subject,
+        html=row["html"],
+        plain=row["plain"],
+        to_emails=[addr],
+    )
+    if ok:
+        flash(f"Test email sent to {addr} — subject: {test_subject}")
+    else:
+        flash("Send failed — check Mailgun configuration and server logs.")
+    return redirect(url_for("index"))
 
 
 @app.route("/add", methods=["POST"])
