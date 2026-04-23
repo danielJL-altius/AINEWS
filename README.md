@@ -87,6 +87,30 @@ TZ=America/New_York
 
 Or on AWS Lambda + EventBridge with the same cron expression (UTC: `15 12 * * ? *`).
 
+### Railway (cron + send real emails)
+
+Railway can run the brief on a schedule in the **same** GitHub repo as a **second** service (the web app stays the dashboard; the cron service only runs `main.py`).
+
+1. In the Railway project, **New** → **GitHub repo** (or **Empty** → connect repo) → pick this repo.
+2. Set the service name (e.g. `daily-brief-cron`).
+3. **Settings → Deploy → Custom Start Command:**  
+   `python main.py`  
+   (no `--dry-run` — that would skip subscriber delivery. This sends real Mailgun email.)
+4. **Settings → Deploy → Cron Schedule** (enable Cron on this service). Use a [cron expression in **UTC**](https://crontab.guru) — Railway does not apply `TIMEZONE` to the schedule string.
+
+   | Target | Cron (UTC) | Notes |
+   |--------|------------|--------|
+   | **~8:00 AM Eastern, Mon–Fri** | `0 12 * * 1-5` | Matches **8:00 AM Eastern Daylight Time** (roughly Mar–Nov). |
+   | **~8:00 AM Eastern, Mon–Fri** (winter) | `0 13 * * 1-5` | Matches **8:00 AM Eastern Standard Time** (roughly Nov–Mar). |
+
+   If you need exactly 8:00 AM America/New_York year-round, switch the schedule when DST changes, or use a self-hosted box / VM that supports `TZ=America/New_York` in crontab (see above).
+
+5. **Variables:** give this service the **same** env as production (`ANTHROPIC_API_KEY`, `NEWSAPI_AI_KEY`, `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `DB_PATH` if you use a **volume mounted at the same path** on both the web and cron services, `FROM_EMAIL`, `TO_EMAILS`, etc.). In Railway, use **Shared Variables** or “Reference” from the dashboard service to avoid drift.
+
+6. For SQLite, the cron job and the dashboard must use the **same** database file. Mount one **shared volume** (e.g. mount path `/data`) and set `DB_PATH=/data/news.db` on **both** the web and cron services.
+
+7. A normal production run: **~07:00–07:20 ET** start is fine if you want a buffer before 8:00 AM; use `0 11 * * 1-5` or `0 12 * * 1-5` UTC as you prefer. The README’s 07:15 ET example maps to `15 12 * * 1-5` UTC in EDT (or `15 13` in EST) if you need that specific offset.
+
 ## Project layout
 
 ```
