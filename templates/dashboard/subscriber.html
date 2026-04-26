@@ -21,6 +21,25 @@
 
 <form method="POST" action="/subscriber/{{ sub.email }}/save">
 
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="section-label">Send time (Eastern)</div>
+    <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; max-width: 640px;">
+      The job that runs <code style="color: var(--accent);">main.py</code> must fire during this same clock hour
+      in <strong>America/New_York</strong> (Eastern Time), or set <code style="color: var(--accent);">SEND_IGNORE_PREFERRED_HOUR=1</code>
+      to send everyone on every run. For several delivery times, schedule the job hourly for the hours you use.
+    </p>
+    <div class="form-group" style="max-width: 320px;">
+      <label class="form-label" for="pref-hour">Preferred delivery hour (ET)</label>
+      <select class="form-input" name="preferred_send_hour" id="pref-hour" style="padding: 9px 12px; cursor: pointer;">
+        {% for h in range(24) %}
+        <option value="{{ h }}" {% if (sub['preferred_send_hour_et']|default(8))|int == h %}selected{% endif %}>
+          {{ hour_labels[h] }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
   <!-- TOPICS -->
   <div class="card" style="margin-bottom: 20px;">
     <div class="section-label">Topics &mdash; select which categories this subscriber receives</div>

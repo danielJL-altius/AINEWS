@@ -29,6 +29,8 @@ from config import (
     MAILGUN_DOMAIN,
     MAILGUN_REGION,
     REPLY_TO,
+    SEND_IGNORE_PREFERRED_HOUR,
+    TIMEZONE,
     TO_EMAILS,
 )
 
@@ -198,6 +200,7 @@ def deliver_to_subscribers(
     *,
     content,
     today_str: str,
+    brief_date: str,
     ingest_stats: dict,
     db_path: str = DB_PATH,
 ) -> int:
@@ -205,12 +208,25 @@ def deliver_to_subscribers(
     Load all active subscribers from the DB, personalize and send each their
     own copy of the brief filtered to their topic/source preferences.
 
+    For each active subscriber, mail goes out only when the current time in
+    ``TIMEZONE`` (default America/New_York) matches ``preferred_send_hour_et``,
+    unless ``SEND_IGNORE_PREFERRED_HOUR`` is set in the environment.
+
     Falls back to TO_EMAILS from config if no active subscribers are in the DB.
     Returns the number of emails successfully sent.
     """
-    from src.db import connect, get_all_subscribers, get_subscriber_prefs
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from src.db import (
+        append_email_delivery_log,
+        connect,
+        get_all_subscribers,
+        get_subscriber_prefs,
+    )
     from src.render import render_email
 
+    now_h = datetime.now(ZoneInfo(TIMEZONE)).hour
     with connect(db_path) as conn:
         all_subs = get_all_subscribers(conn)
 
@@ -219,23 +235,60 @@ def deliver_to_subscribers(
     if not active_subs:
         log.info("No active DB subscribers — falling back to TO_EMAILS config list")
         html, plain = render_email(content, today_str=today_str, ingest_stats=ingest_stats)
+        subj = (content.subject or "")[:200]
         ok = send_email(subject=content.subject, html=html, plain=plain)
+        with connect(db_path) as conn:
+            for addr in TO_EMAILS:
+                append_email_delivery_log(
+                    conn,
+                    brief_date=brief_date,
+                    to_email=addr,
+                    subject=subj,
+                    outcome="fallback_sent" if ok else "fallback_failed",
+                    error=None if ok else "send_email returned false",
+                )
+            conn.commit()
         return len(TO_EMAILS) if ok else 0
 
     sent_count = 0
     for sub in active_subs:
+        want_h = int(sub["preferred_send_hour_et"] or 8) % 24
+        if not SEND_IGNORE_PREFERRED_HOUR and want_h != now_h:
+            with connect(db_path) as conn:
+                append_email_delivery_log(
+                    conn,
+                    brief_date=brief_date,
+                    to_email=sub["email"],
+                    subject=(content.subject or "")[:200],
+                    outcome="skipped",
+                    error=f"not scheduled hour (wants {want_h:02d}:00 {TIMEZONE}, now {now_h:02d}:00)",
+                )
+                conn.commit()
+            log.info("Skip %s — preferred hour %d ET, now hour %d", sub["email"], want_h, now_h)
+            continue
+
         with connect(db_path) as conn:
             prefs = get_subscriber_prefs(conn, sub["email"])
 
         personalized = _filter_content_for_subscriber(content, prefs)
         html, plain = render_email(personalized, today_str=today_str, ingest_stats=ingest_stats)
-
+        subj_line = (personalized.subject or "")[:200]
         ok = send_email(
             subject=personalized.subject,
             html=html,
             plain=plain,
             to_emails=[sub["email"]],
         )
+        with connect(db_path) as conn:
+            append_email_delivery_log(
+                conn,
+                brief_date=brief_date,
+                to_email=sub["email"],
+                subject=subj_line,
+                outcome="sent" if ok else "failed",
+                error=None if ok else "send_email returned false",
+            )
+            conn.commit()
         if ok:
             sent_count += 1
             log.info("Sent to %s (%s)", sub["name"] or sub["email"], sub["email"])

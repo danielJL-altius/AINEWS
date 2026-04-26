@@ -6,6 +6,7 @@ Tables:
 - sent_emails: history of what we've already shipped, used for dedup
 - subscribers: people who receive the daily brief
 - subscriber_prefs: per-subscriber topic/source toggles
+- email_delivery_log: one row per outbound send attempt (audit / cron visibility)
 
 Schema is intentionally minimal. Upgrade to Postgres when we outgrow single-writer.
 """
@@ -50,7 +51,8 @@ CREATE TABLE IF NOT EXISTS subscribers (
     email       TEXT PRIMARY KEY,
     name        TEXT NOT NULL DEFAULT '',
     active      INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    preferred_send_hour_et INTEGER NOT NULL DEFAULT 8
 );
 
 CREATE TABLE IF NOT EXISTS subscriber_prefs (
@@ -73,6 +75,19 @@ CREATE TABLE IF NOT EXISTS inbound_mail_log (
 
 CREATE INDEX IF NOT EXISTS idx_inbound_mail_received
     ON inbound_mail_log (received_at DESC);
+
+CREATE TABLE IF NOT EXISTS email_delivery_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    sent_at       TEXT NOT NULL,
+    brief_date    TEXT,
+    to_email      TEXT,
+    subject       TEXT,
+    outcome       TEXT NOT NULL,
+    error         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_delivery_sent_at
+    ON email_delivery_log (sent_at DESC);
 """
 
 
@@ -108,11 +123,20 @@ def ensure_subscriber_source_rows(conn: sqlite3.Connection) -> None:
             )
 
 
+def _ensure_subscriber_preferred_hour_column(conn: sqlite3.Connection) -> None:
+    have = {row[1] for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()}
+    if "preferred_send_hour_et" not in have:
+        conn.execute(
+            "ALTER TABLE subscribers ADD COLUMN preferred_send_hour_et INTEGER NOT NULL DEFAULT 8"
+        )
+
+
 def init_db(db_path: str) -> None:
     """Create the database file and schema if they don't exist."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _ensure_subscriber_preferred_hour_column(conn)
         _ensure_subscriber_topic_rows(conn)
         ensure_subscriber_source_rows(conn)
         conn.commit()
@@ -317,15 +341,65 @@ def list_inbound_mail_log(conn: sqlite3.Connection, *, limit: int = 100) -> List
     )
 
 
+def append_email_delivery_log(
+    conn: sqlite3.Connection,
+    *,
+    brief_date: str,
+    to_email: Optional[str],
+    subject: str,
+    outcome: str,
+    error: Optional[str] = None,
+) -> None:
+    """
+    One row per outbound send attempt. ``outcome``: sent, skipped, failed, fallback_config, fallback_failed.
+    """
+    ts = datetime.utcnow().isoformat() + "Z"
+    conn.execute(
+        """
+        INSERT INTO email_delivery_log (sent_at, brief_date, to_email, subject, outcome, error)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ts,
+            (brief_date or None)[:32],
+            (to_email or None)[:500] if to_email else None,
+            (subject or "")[:500],
+            (outcome or "")[:64],
+            (error or None)[:500] if error else None,
+        ),
+    )
+
+
+def list_email_delivery_log(conn: sqlite3.Connection, *, limit: int = 120) -> List[sqlite3.Row]:
+    """Newest delivery attempts first (includes skipped / failed for cron verification)."""
+    return list(
+        conn.execute(
+            """
+            SELECT id, sent_at, brief_date, to_email, subject, outcome, error
+            FROM email_delivery_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    )
+
+
 # =========================================================================
 # SUBSCRIBER MANAGEMENT
 # =========================================================================
 
 def get_all_subscribers(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     """Return all subscribers ordered by creation date descending."""
-    return list(conn.execute(
-        "SELECT email, name, active, created_at FROM subscribers ORDER BY created_at DESC"
-    ).fetchall())
+    return list(
+        conn.execute(
+            """
+            SELECT email, name, active, created_at, preferred_send_hour_et
+            FROM subscribers
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    )
 
 
 def get_subscriber(
@@ -333,7 +407,7 @@ def get_subscriber(
     email: str,
 ) -> Optional[sqlite3.Row]:
     return conn.execute(
-        "SELECT email, name, active, created_at FROM subscribers WHERE email = ?",
+        "SELECT email, name, active, created_at, preferred_send_hour_et FROM subscribers WHERE email = ?",
         (email,),
     ).fetchone()
 
@@ -343,16 +417,22 @@ def create_subscriber(
     *,
     email: str,
     name: str,
+    preferred_send_hour_et: Optional[int] = None,
 ) -> None:
     """
     Insert a new subscriber and seed their prefs with all topics and sources
     enabled so they receive the full brief by default.
     """
-    from config import CATEGORIES, get_monitored_sources
+    from config import CATEGORIES, DEFAULT_PREFERRED_SEND_HOUR_ET, get_monitored_sources
 
+    h = int(DEFAULT_PREFERRED_SEND_HOUR_ET if preferred_send_hour_et is None else preferred_send_hour_et) % 24
     conn.execute(
-        "INSERT OR IGNORE INTO subscribers (email, name, active, created_at) VALUES (?, ?, 1, ?)",
-        (email, name, datetime.utcnow().isoformat() + "Z"),
+        """
+        INSERT OR IGNORE INTO subscribers
+            (email, name, active, created_at, preferred_send_hour_et)
+        VALUES (?, ?, 1, ?, ?)
+        """,
+        (email, name, datetime.utcnow().isoformat() + "Z", h),
     )
     for topic in CATEGORIES:
         conn.execute(
@@ -433,3 +513,16 @@ def set_subscriber_prefs(
             "INSERT OR REPLACE INTO subscriber_prefs (email, pref_type, pref_value, enabled) VALUES (?, 'source', ?, ?)",
             (email, source, enabled),
         )
+
+
+def update_subscriber_preferred_send_hour(
+    conn: sqlite3.Connection,
+    email: str,
+    *,
+    hour_et: int,
+) -> None:
+    h = int(hour_et) % 24
+    conn.execute(
+        "UPDATE subscribers SET preferred_send_hour_et = ? WHERE email = ?",
+        (h, email),
+    )

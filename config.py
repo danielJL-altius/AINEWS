@@ -388,6 +388,32 @@ LLM_MAX_TOKENS = 8000
 
 TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 
+# New subscribers: hour (0–23) in TIMEZONE when they want the daily brief delivered.
+# The scheduled job’s clock (Eastern) must match this hour, or set SEND_IGNORE_PREFERRED_HOUR.
+_default_pref_h = int(os.getenv("DEFAULT_PREFERRED_SEND_HOUR_ET", "8"))
+DEFAULT_PREFERRED_SEND_HOUR_ET: int = max(0, min(23, _default_pref_h))
+
+# If true, every active subscriber gets mail on every run; preferred hour is stored but not enforced.
+SEND_IGNORE_PREFERRED_HOUR: bool = os.getenv("SEND_IGNORE_PREFERRED_HOUR", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+
+def format_preferred_send_hour_label(hour_et: int) -> str:
+    """Readable label in 12-hour clock (Eastern) for admin UI and logs."""
+    h = int(hour_et) % 24
+    if h == 0:
+        return "12:00 AM (ET)"
+    if h < 12:
+        return f"{h}:00 AM (ET)"
+    if h == 12:
+        return "12:00 PM (ET)"
+    return f"{h - 12}:00 PM (ET)"
+
+
 # =========================================================================
 # INBOUND EMAIL (forward-to-ingest webhook) — see inbound_server.py
 # =========================================================================

@@ -12,6 +12,16 @@
   <p class="subtitle">Manage who receives the morning brief and configure their topic &amp; source preferences.</p>
 </div>
 
+{% if send_ignore_preferred_hour|default(false) %}
+<div class="add-card" style="margin-bottom: 16px; border-color: rgba(200,148,58,0.4);">
+  <div class="add-card-title" style="color: var(--accent);">Per-subscriber send hour is ignored</div>
+  <p style="font-size: 12px; color: var(--text-muted); margin: 0; max-width: 720px;">
+    <code style="color: var(--accent);">SEND_IGNORE_PREFERRED_HOUR</code> is set — every active subscriber gets the brief on every successful
+    <code style="color: var(--accent);">main.py</code> run. Unset it to enforce each person’s preferred Eastern hour.
+  </p>
+</div>
+{% endif %}
+
 {% set bs = brief_state|default({}) %}
 {% if bs.get('last_error') %}
 <div class="add-card" style="margin-bottom: 16px; border-color: rgba(224,64,64,0.35); background: var(--red-bg);">
@@ -83,6 +93,68 @@
   <p style="font-size: 11px; color: var(--text-dim); margin-top: 12px; font-family: var(--font-mono);">
     No archives yet — run <strong>Generate &amp; archive daily brief</strong> above first, then refresh.
   </p>
+  {% endif %}
+</div>
+
+<!-- Outbound: per-recipient delivery (cron + Mailgun) -->
+<div class="card" style="margin-bottom: 24px;">
+  <div class="card-header" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+    <span class="card-title">Outbound — delivery log</span>
+    <span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">
+      One row per recipient (or <span style="color: var(--text);">fallback_config</span> to your
+      <code style="color: var(--accent);">TO_EMAILS</code> when no active subscribers). Use this to confirm the
+      scheduled run delivered on time. <strong style="color: var(--text);">Skipped</strong> means the run was
+      not in that subscriber’s preferred Eastern hour.
+    </span>
+  </div>
+  {% if delivery_log|default([]) %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Sent (UTC)</th>
+        <th>Brief day</th>
+        <th>To / Subject</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in delivery_log %}
+      <tr>
+        <td>
+          <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap;">{{ (row['sent_at'] or '')[:19] }}{% if row['sent_at'] %}Z{% else %}—{% endif %}</span>
+        </td>
+        <td>
+          <span style="font-family: var(--font-mono); font-size: 12px;">{{ row['brief_date'] or '—' }}</span>
+        </td>
+        <td>
+          <div class="sub-name" style="font-size: 12px; font-family: var(--font-mono);">{{ row['to_email'] or '—' }}</div>
+          <div class="sub-email" style="font-size: 11px; margin-top: 2px; color: var(--text-muted);">{% if row['subject'] %}{{ (row['subject']|default(''))[:90] }}{% if (row['subject']|default('', true)|length) > 90 %}…{% endif %}{% else %}(no subject){% endif %}</div>
+        </td>
+        <td>
+          {% set oc = (row['outcome'] or '')|lower %}
+          {% if oc == 'sent' or oc == 'fallback_sent' %}
+            <span class="badge badge-active">{{ row['outcome'] }}</span>
+          {% elif oc == 'failed' or oc == 'fallback_failed' %}
+            <span class="badge badge-inactive">{{ row['outcome'] }}</span>
+            <div style="font-size: 10px; color: var(--red); margin-top: 4px; max-width: 200px;">{{ row['error'] or '' }}</div>
+          {% else %}
+            <span class="badge" style="background: var(--bg-elevated); color: var(--text-muted);">{{ row['outcome'] }}</span>
+            {% if row['error'] %}
+            <div style="font-size: 10px; color: var(--text-dim); margin-top: 4px; max-width: 220px;">{{ row['error'] }}</div>
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding: 28px 20px;">
+    <p style="max-width: 520px; margin: 0 auto; line-height: 1.6; color: var(--text-muted); font-size: 13px;">
+      No delivery attempts logged yet. After production sends from <code style="color: var(--accent);">main.py</code>, each message appears here
+      with a UTC timestamp you can match to your cron.
+    </p>
+  </div>
   {% endif %}
 </div>
 
@@ -163,6 +235,7 @@
     <thead>
       <tr>
         <th>Recipient</th>
+        <th>Send (ET)</th>
         <th>Added</th>
         <th>Status</th>
         <th>Actions</th>
@@ -181,6 +254,11 @@
               <div class="sub-email">{{ sub.email }}</div>
             </div>
           </div>
+        </td>
+        <td>
+          <span style="font-size: 12px; color: var(--text-muted);">
+            {{ hour_labels[(sub['preferred_send_hour_et']|default(8))|int] }}
+          </span>
         </td>
         <td>
           <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">
@@ -225,14 +303,22 @@
 <div class="add-card">
   <div class="add-card-title">Add Subscriber</div>
   <form method="POST" action="/add">
-    <div class="form-row">
+    <div class="form-row" style="flex-wrap: wrap; align-items: flex-end; gap: 12px;">
       <div class="form-group" style="max-width: 200px;">
         <label class="form-label" for="name">Name</label>
         <input class="form-input" type="text" id="name" name="name" placeholder="Justin Fox" />
       </div>
-      <div class="form-group">
+      <div class="form-group" style="min-width: 200px; flex: 1;">
         <label class="form-label" for="email">Email</label>
         <input class="form-input" type="email" id="email" name="email" placeholder="jfox@3g-capital.com" required />
+      </div>
+      <div class="form-group" style="min-width: 200px;">
+        <label class="form-label" for="add-pref-hour">First send (ET)</label>
+        <select class="form-input" name="preferred_send_hour" id="add-pref-hour" style="padding: 9px 12px; cursor: pointer;">
+          {% for h in range(24) %}
+          <option value="{{ h }}" {% if h == 8 %}selected{% endif %}>{{ hour_labels[h] }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div style="padding-bottom: 1px;">
         <button type="submit" class="btn btn-primary">+ Add</button>

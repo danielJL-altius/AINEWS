@@ -187,6 +187,7 @@ def run(*, dry_run: bool = False, skip_ingest: bool = False, verbose: bool = Tru
         sent = deliver_to_subscribers(
             content=content,
             today_str=today_str,
+            brief_date=today_date,
             ingest_stats=ingest_stats,
         )
         log.info("Delivered to %d subscriber(s).", sent)

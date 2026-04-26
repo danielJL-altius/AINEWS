@@ -111,6 +111,10 @@ Railway can run the brief on a schedule in the **same** GitHub repo as a **secon
 
 7. A normal production run: **~07:00–07:20 ET** start is fine if you want a buffer before 8:00 AM; use `0 11 * * 1-5` or `0 12 * * 1-5` UTC as you prefer. The README’s 07:15 ET example maps to `15 12 * * 1-5` UTC in EDT (or `15 13` in EST) if you need that specific offset.
 
+8. **Delivery audit:** the dashboard’s **Outbound — delivery log** lists each send attempt (UTC time, brief day, recipient, outcome). Use it to confirm the cron fired and Mailgun accepted mail. **Skipped** means the run was not in that subscriber’s preferred Eastern hour (see below).
+
+9. **Preferred send time (Eastern):** each subscriber can pick an hour (0–23) in `America/New_York`. A recipient is only emailed when the cron runs during **that** local hour. Default is **8** (8:00–8:59 AM ET). For one shared daily run at 8 AM ET, leave everyone on 8:00. For multiple times, add cron entries for each hour you need, or set **`SEND_IGNORE_PREFERRED_HOUR=1`** so every active subscriber gets mail on every run (dropdown values are then informational). Optional: **`DEFAULT_PREFERRED_SEND_HOUR_ET=8`** for new signups.
+
 ## Project layout
 
 ```

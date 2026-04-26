@@ -38,6 +38,8 @@ from config import (
     DASHBOARD_SECRET_KEY,
     DB_PATH,
     SECTOR_INGEST_CATEGORIES,
+    SEND_IGNORE_PREFERRED_HOUR,
+    format_preferred_send_hour_label,
     get_effective_source_display_names,
     get_ingest_dashboard_context,
     get_monitored_sources,
@@ -47,17 +49,19 @@ from src.ingest_settings_io import load_raw, save_raw
 from src.inbound_routes import inbound_bp
 from src.db import (
     connect,
-    ensure_subscriber_source_rows,
     create_subscriber,
     delete_subscriber,
+    ensure_subscriber_source_rows,
     get_all_subscribers,
     get_sent_email_full,
     get_subscriber,
     get_subscriber_prefs,
     init_db,
+    list_email_delivery_log,
     list_inbound_mail_log,
     list_sent_emails_recent,
     set_subscriber_prefs,
+    update_subscriber_preferred_send_hour,
     upsert_subscriber,
 )
 from src.deliver import send_email
@@ -243,11 +247,15 @@ def index():
         subscribers = get_all_subscribers(conn)
         sent_archives = list_sent_emails_recent(conn, limit=30)
         inbound_log = list_inbound_mail_log(conn, limit=80)
+        delivery_log = list_email_delivery_log(conn, limit=100)
     return render_template(
         "dashboard/subscribers.html",
         subscribers=subscribers,
         sent_archives=sent_archives,
         inbound_log=inbound_log,
+        delivery_log=delivery_log,
+        send_ignore_preferred_hour=SEND_IGNORE_PREFERRED_HOUR,
+        hour_labels={h: format_preferred_send_hour_label(h) for h in range(24)},
         brief_state=_brief_state_snapshot(),
     )
 
@@ -336,7 +344,14 @@ def add_subscriber():
         if existing:
             flash(f"{email} is already a subscriber.")
         else:
-            create_subscriber(conn, email=email, name=name)
+            raw_h = (request.form.get("preferred_send_hour") or "").strip()
+            ph: int | None = None
+            if raw_h != "":
+                try:
+                    ph = max(0, min(23, int(raw_h)))
+                except ValueError:
+                    ph = None
+            create_subscriber(conn, email=email, name=name, preferred_send_hour_et=ph)
             conn.commit()
             flash(f"Added {name or email} to the subscriber list.")
     return redirect(url_for("index"))
@@ -355,6 +370,7 @@ def subscriber(email: str):
             flash(f"Subscriber {email} not found.")
             return redirect(url_for("index"))
         prefs = get_subscriber_prefs(conn, email)
+    hlabels = {h: format_preferred_send_hour_label(h) for h in range(24)}
     return render_template(
         "dashboard/subscriber.html",
         sub=sub,
@@ -362,6 +378,7 @@ def subscriber(email: str):
         categories=CATEGORIES,
         sources=get_monitored_sources(),
         source_labels=get_effective_source_display_names(),
+        hour_labels=hlabels,
     )
 
 
@@ -375,6 +392,12 @@ def save_prefs(email: str):
         if not sub:
             return redirect(url_for("index"))
         set_subscriber_prefs(conn, email, topics=topics, sources=sources)
+        try:
+            ph = int((request.form.get("preferred_send_hour") or "8").strip())
+            ph = max(0, min(23, ph))
+        except ValueError:
+            ph = 8
+        update_subscriber_preferred_send_hour(conn, email, hour_et=ph)
         conn.commit()
     flash("Preferences saved.")
     return redirect(url_for("subscriber", email=email))
