@@ -171,6 +171,108 @@ def parse_eml_bytes(data: bytes) -> Tuple[str, str, Optional[str], Optional[str]
     return from_hdr, subject, plain, html, message_id
 
 
+def extract_forward_content_from_rfc822_bytes(
+    data: bytes,
+    *,
+    filename: str = "",
+    content_type: str = "",
+    strict: bool = True,
+) -> Optional[Tuple[Optional[str], Optional[str], str, Optional[str]]]:
+    """
+    If ``data`` is a stored email (RFC 822) with a non-empty text/html body,
+    return (plain, html, subject, message_id) for use as the forwarded article.
+
+    When ``strict`` is True, only try parsing when the part looks like an .eml
+    (filename ends in .eml) or the MIME type is message/rfc822. When ``strict``
+    is False (e.g. top-level body was empty), try parsing any reasonably-sized
+    part so a mislabeled Mailgun octet-stream attachment can still be ingested.
+    """
+    if not data or len(data) > 8 * 1024 * 1024:
+        return None
+    fn = (filename or "").lower()
+    ct = (content_type or "").lower()
+    if strict and not (fn.endswith(".eml") or "rfc822" in ct or ct == "message/rfc822"):
+        return None
+    if not strict and not _sniff_rfc822(data):
+        return None
+    try:
+        _, subject, plain, html, message_id = parse_eml_bytes(data)
+    except Exception as e:  # noqa: BLE001 — parse should not raise often; be defensive
+        log.debug("parse_eml_bytes failed for attachment name=%r: %s", filename, e)
+        return None
+    body = choose_body_text(plain, html)
+    if not body.strip():
+        return None
+    return (plain, html, (subject or "").strip() or "(no subject)", message_id)
+
+
+def _sniff_rfc822(data: bytes) -> bool:
+    """Cheap check that bytes look like a raw email, not a PDF/PNG."""
+    head = data.lstrip()[:4000]
+    for sig in (b"From ", b"Return-Path:", b"MIME-Version:", b"Received:"):
+        if head.startswith(sig) or sig in head[:800]:
+            return True
+    return False
+
+
+def refill_forward_from_request_attachments(
+    request,  # Flask Request; untyped to avoid hard dependency in tests
+    text: Optional[str],
+    html: Optional[str],
+    subject: str,
+) -> Tuple[Optional[str], Optional[str], str, Optional[str]]:
+    """
+    When Mailgun's stripped body is empty but the user attached a .eml (message/rfc822),
+    use the *inner* message's text/html, subject, and Message-ID.
+
+    Returns (text, html, subject, message_id) where the last is an inner
+    Message-ID to prefer for ``stable_forward_url`` dedup, or None if no
+    attachment supplied usable content.
+    """
+    if choose_body_text(text, html).strip():
+        return (text, html, subject, None)
+
+    files = getattr(request, "files", None)
+    if not files:
+        return (text, html, subject, None)
+
+    # Mailgun: attachment-1, attachment-2, ... (Werkzeug may hold multiple per key)
+    names = sorted(files.keys(), key=lambda k: (k, k))
+    for pass_strict in (True, False):
+        for name in names:
+            if hasattr(files, "getlist"):
+                storages = files.getlist(name) or []  # type: ignore[union-attr]
+            else:
+                one = files.get(name)
+                storages = [one] if one else []
+            for storage in storages:
+                if not storage or not getattr(storage, "filename", None):
+                    continue
+                try:
+                    raw = storage.read()
+                except OSError as e:
+                    log.warning("Could not read inbound attachment %s: %s", name, e)
+                    continue
+                try:
+                    storage.stream.seek(0)  # type: ignore[union-attr]
+                except Exception:  # noqa: BLE001
+                    pass
+                r = extract_forward_content_from_rfc822_bytes(
+                    raw,
+                    filename=storage.filename or "",
+                    content_type=getattr(storage, "content_type", None) or "",
+                    strict=pass_strict,
+                )
+                if r:
+                    tplain, thtml, tsub, tmid = r
+                    subj = tsub or subject
+                    if not (subj or "").strip():
+                        subj = "(no subject)"
+                    log.info("Using inbound attachment %r as body (len=%d)", name, len(raw))
+                    return (tplain, thtml, subj, tmid)
+    return (text, html, subject, None)
+
+
 def ingest_forward_email(
     *,
     db_path: str,

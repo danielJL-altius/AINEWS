@@ -13,7 +13,11 @@ from flask import Blueprint, abort, jsonify, request
 
 from config import DB_PATH, INBOUND_WEBHOOK_SECRET, FORWARD_ALLOWED_SENDERS
 from src.db import append_inbound_mail_log, connect, init_db
-from src.forward_ingest import ingest_forward_email, parse_allowlist_csv
+from src.forward_ingest import (
+    ingest_forward_email,
+    parse_allowlist_csv,
+    refill_forward_from_request_attachments,
+)
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +81,12 @@ def inbound_email():
     init_db(DB_PATH)  # ensure inbound_mail_log exists (first webhook or standalone inbound server)
 
     from_hdr, subject, text, html, headers = _extract_inbound_parts()
-
+    text, html, subject, message_id_from_eml = refill_forward_from_request_attachments(
+        request,
+        text,
+        html,
+        subject,
+    )
     allowlist = parse_allowlist_csv(FORWARD_ALLOWED_SENDERS)
     result = ingest_forward_email(
         db_path=DB_PATH,
@@ -87,6 +96,7 @@ def inbound_email():
         html=html,
         headers_raw=headers,
         allowlist=allowlist,
+        message_id=message_id_from_eml,
     )
     if not result.get("ok"):
         log.info("Inbound not stored: %s", result.get("error"))
