@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 # Load .env file if present. Must happen before any os.getenv() calls below.
 try:
@@ -85,6 +86,83 @@ SOURCE_DISPLAY_NAMES: dict = {
     "finance.yahoo.com":              "Yahoo Finance",
     "biztoc.com":                     "BizToc",
 }
+
+
+def normalize_source_uri(raw: str) -> str:
+    """
+    Map user/API input to an Event Registry sourceUri (lowercase domain, no path).
+    """
+    s = (raw or "").strip().lower()
+    if "://" in s:
+        s = (urlparse(s).netloc or s).lower()
+    s = s.lstrip("www.").rstrip("/")
+    if "/" in s:
+        s = s.split("/")[0]
+    s = s.split("?")[0]
+    if s.startswith("*."):
+        s = s[2:]
+    return s
+
+
+def _extra_sources_from_snapshot(snapshot: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Return [{'uri': 'theguardian.com', 'title': 'The Guardian'}, ...] from ingest_settings.json.
+    """
+    out: List[Dict[str, str]] = []
+    raw = (snapshot or {}).get("extra_sources")
+    if not isinstance(raw, list):
+        return out
+    seen: set = set()
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            u = normalize_source_uri(item)
+            if u and u not in seen:
+                seen.add(u)
+                out.append({"uri": u, "title": u})
+        elif isinstance(item, dict) and item.get("uri"):
+            u = normalize_source_uri(str(item["uri"]))
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            t = (item.get("title") or item.get("name") or "").strip()
+            out.append({"uri": u, "title": t or u})
+    return out
+
+
+def get_monitored_sources() -> List[str]:
+    """
+    Built-in PREFERRED_SOURCES plus any extra domained sources saved in
+    data/ingest_settings.json (key: extra_sources). Each process call re-reads
+    the file so the dashboard and cron see updates without a code deploy.
+    """
+    snap = _load_ingest_snapshot()
+    extras = _extra_sources_from_snapshot(snap)
+    extra_uris = [e["uri"] for e in extras]
+    seen: set = set()
+    out: List[str] = []
+    for u in list(PREFERRED_SOURCES) + extra_uris:
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def get_effective_source_display_names() -> Dict[str, str]:
+    """SOURCE_DISPLAY_NAMES plus optional titles for extra sources from ingest_settings.json."""
+    names: Dict[str, str] = dict(SOURCE_DISPLAY_NAMES)
+    snap = _load_ingest_snapshot()
+    for e in _extra_sources_from_snapshot(snap):
+        u, t = e["uri"], (e.get("title") or "").strip()
+        if t:
+            names[u] = t
+    ovr = snap.get("source_display_names")
+    if isinstance(ovr, dict):
+        for k, v in ovr.items():
+            ku = normalize_source_uri(str(k))
+            if ku and v and str(v).strip():
+                names[ku] = str(v).strip()
+    return names
+
 
 # =========================================================================
 # PRIORITY COMPANIES / TICKERS / 3G FLAGS — defaults (merged with data/ingest_settings.json)
@@ -362,6 +440,7 @@ def get_ingest_dashboard_context() -> Dict[str, Any]:
         "max_keyword_alert_file": _int_from_file_only(snap, "max_keyword_alert_articles", 32),
         "env_overrides_watchlist": env_wl,
         "env_overrides_max_kw": env_max,
+        "extra_sources": _extra_sources_from_snapshot(snap),
     }
 
 

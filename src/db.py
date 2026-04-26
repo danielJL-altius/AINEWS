@@ -92,12 +92,29 @@ def _ensure_subscriber_topic_rows(conn: sqlite3.Connection) -> None:
             )
 
 
+def ensure_subscriber_source_rows(conn: sqlite3.Connection) -> None:
+    """Insert missing source preference rows when new domains are added (e.g. via dashboard)."""
+    from config import get_monitored_sources
+
+    for row in conn.execute("SELECT email FROM subscribers"):
+        email = row["email"]
+        for uri in get_monitored_sources():
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO subscriber_prefs (email, pref_type, pref_value, enabled)
+                VALUES (?, 'source', ?, 1)
+                """,
+                (email, uri),
+            )
+
+
 def init_db(db_path: str) -> None:
     """Create the database file and schema if they don't exist."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
         _ensure_subscriber_topic_rows(conn)
+        ensure_subscriber_source_rows(conn)
         conn.commit()
 
 
@@ -331,7 +348,7 @@ def create_subscriber(
     Insert a new subscriber and seed their prefs with all topics and sources
     enabled so they receive the full brief by default.
     """
-    from config import CATEGORIES, PREFERRED_SOURCES
+    from config import CATEGORIES, get_monitored_sources
 
     conn.execute(
         "INSERT OR IGNORE INTO subscribers (email, name, active, created_at) VALUES (?, ?, 1, ?)",
@@ -342,7 +359,7 @@ def create_subscriber(
             "INSERT OR IGNORE INTO subscriber_prefs (email, pref_type, pref_value, enabled) VALUES (?, 'topic', ?, 1)",
             (email, topic),
         )
-    for source in PREFERRED_SOURCES:
+    for source in get_monitored_sources():
         conn.execute(
             "INSERT OR IGNORE INTO subscriber_prefs (email, pref_type, pref_value, enabled) VALUES (?, 'source', ?, 1)",
             (email, source),
@@ -402,7 +419,7 @@ def set_subscriber_prefs(
     sources: List[str],
 ) -> None:
     """Replace all prefs for a subscriber. topics/sources are the enabled values."""
-    from config import CATEGORIES, PREFERRED_SOURCES
+    from config import CATEGORIES, get_monitored_sources
 
     for topic in CATEGORIES:
         enabled = 1 if topic in topics else 0
@@ -410,7 +427,7 @@ def set_subscriber_prefs(
             "INSERT OR REPLACE INTO subscriber_prefs (email, pref_type, pref_value, enabled) VALUES (?, 'topic', ?, ?)",
             (email, topic, enabled),
         )
-    for source in PREFERRED_SOURCES:
+    for source in get_monitored_sources():
         enabled = 1 if source in sources else 0
         conn.execute(
             "INSERT OR REPLACE INTO subscriber_prefs (email, pref_type, pref_value, enabled) VALUES (?, 'source', ?, ?)",

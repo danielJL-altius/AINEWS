@@ -74,6 +74,35 @@
 
   <div class="card" style="margin-bottom: 20px;">
     <div class="card-header">
+      <span class="card-title">Additional news sources</span>
+    </div>
+    <div style="padding: 16px 20px 20px;">
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px; line-height: 1.5;">
+        The default set lives in <span style="font-family: var(--font-mono);">config.PREFERRED_SOURCES</span>.
+        Use the lookup to add more Event Registry domains; they are saved here and apply on the next
+        <code style="font-family:var(--font-mono); font-size:12px;">main.py</code> run. Duplicates of a default source are ignored.
+      </p>
+      <div class="form-group" style="margin-bottom: 12px; position: relative;">
+        <label class="form-label" for="source-lookup">Search by name or domain</label>
+        <input
+          type="search"
+          class="form-input"
+          id="source-lookup"
+          placeholder="e.g. Guardian, BBC, theguardian.com"
+          autocomplete="off"
+          style="font-family: var(--font-mono); font-size: 13px;"
+        />
+        <div id="suggest-menu" class="suggest-menu" style="display: none; position: absolute; left: 0; right: 0; z-index: 20; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); max-height: 220px; overflow-y: auto; margin-top: 4px; box-shadow: var(--shadow);">
+        </div>
+      </div>
+      <div id="extra-sources-chips" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 8px; margin-bottom: 8px;">
+      </div>
+      <input type="hidden" name="extra_sources_json" id="extra_sources_json" value="" />
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
       <span class="card-title">LLM — priority &amp; 3G flag layer</span>
     </div>
     <div style="padding: 16px 20px 20px;">
@@ -120,5 +149,102 @@
     <a href="/" class="btn">Cancel</a>
   </div>
 </form>
+
+<script>
+(function() {
+  const INITIAL = {{ (extra_sources or [])|tojson }};
+  const list = [];
+  const hidden = document.getElementById('extra_sources_json');
+  const chips = document.getElementById('extra-sources-chips');
+  const input = document.getElementById('source-lookup');
+  const menu = document.getElementById('suggest-menu');
+  let tmr = null;
+
+  function saveHidden() {
+    hidden.value = JSON.stringify(list);
+  }
+
+  function render() {
+    chips.innerHTML = '';
+    list.forEach(function(row) {
+      const u = row.uri;
+      const wrap = document.createElement('span');
+      wrap.className = 'source-chip';
+      wrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;font-size:12px;background:var(--bg-elevated);';
+      const lab = document.createElement('span');
+      lab.textContent = row.title + ' · ' + row.uri;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', 'Remove');
+      btn.textContent = '×';
+      btn.style.cssText = 'background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;line-height:1;padding:0 0 0 2px;';
+      btn.addEventListener('click', function() {
+        for (var i = list.length - 1; i >= 0; i--) {
+          if (list[i].uri === u) list.splice(i, 1);
+        }
+        saveHidden();
+        render();
+      });
+      wrap.appendChild(lab);
+      wrap.appendChild(btn);
+      chips.appendChild(wrap);
+    });
+  }
+
+  function addRow(uri, title) {
+    if (!uri) return;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].uri === uri) return;
+    }
+    list.push({ uri: uri, title: title || uri });
+    saveHidden();
+    render();
+    input.value = '';
+    menu.style.display = 'none';
+  }
+
+  INITIAL.forEach(function(r) {
+    if (r && r.uri) list.push({ uri: r.uri, title: r.title || r.uri });
+  });
+  saveHidden();
+  render();
+
+  input.addEventListener('input', function() {
+    if (tmr) clearTimeout(tmr);
+    const q = input.value.trim();
+    if (q.length < 2) {
+      menu.style.display = 'none';
+      return;
+    }
+    tmr = setTimeout(function() {
+      fetch('/api/suggest-news-sources?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (!Array.isArray(data) || !data.length) {
+            menu.style.display = 'none';
+            return;
+          }
+          menu.innerHTML = '';
+          data.forEach(function(item) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.style.cssText = 'display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:transparent;color:var(--text);font-family:var(--font-sans);font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);';
+            row.textContent = (item.title || item.uri) + ' — ' + (item.uri || '');
+            row.addEventListener('click', function() { addRow(item.uri, item.title); });
+            menu.appendChild(row);
+          });
+          menu.style.display = 'block';
+        })
+        .catch(function() { menu.style.display = 'none'; });
+    }, 300);
+  });
+
+  document.addEventListener('click', function(ev) {
+    if (!input.contains(ev.target) && !menu.contains(ev.target)) {
+      menu.style.display = 'none';
+    }
+  });
+})();
+</script>
 
 {% endblock %}

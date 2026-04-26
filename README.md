@@ -137,7 +137,7 @@ daily_news/
 
 ## Operating notes
 
-**Adding/removing sources.** Edit `PREFERRED_SOURCES` in `config.py`. These are Event Registry domain URIs.
+**Adding/removing sources.** Defaults live in `PREFERRED_SOURCES` in `config.py` (Event Registry `sourceUri` domains, e.g. `wsj.com`). In the dashboard **Settings** page, use **Additional news sources** to search the API and add more; they are stored in `data/ingest_settings.json` under `extra_sources` and are merged in on the next ingest run.
 
 **Adding/removing priority companies.** Edit `PRIORITY_COMPANIES`, `PRIORITY_TICKERS`, and `FLAG_NAMES_3G` in `config.py`. The 3G flag layer is deliberately conservative — it only fires when the article explicitly references 3G.
 

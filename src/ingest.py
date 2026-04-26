@@ -35,7 +35,7 @@ from config import (
     MAX_ARTICLES_PER_CATEGORY,
     MAX_KEYWORD_ALERT_ARTICLES,
     NEWSAPI_AI_KEY,
-    PREFERRED_SOURCES,
+    get_monitored_sources,
 )
 from src.db import upsert_article, connect
 
@@ -92,12 +92,13 @@ def ingest_category(
     Run one Event Registry query for a category and return a list of article
     dicts. Filters to preferred sources and recent publication time.
     """
+    source_uris = get_monitored_sources()
     q = QueryArticlesIter(
         keywords=QueryItems.OR(keywords),
         keywordsLoc="title,body",
         lang="eng",
         dateStart=since.strftime("%Y-%m-%d"),
-        sourceUri=QueryItems.OR(PREFERRED_SOURCES),
+        sourceUri=QueryItems.OR(source_uris),
         isDuplicateFilter="skipDuplicates",
         dataType=["news"],
     )

@@ -50,7 +50,10 @@
       {% for source in sources %}
       <label class="toggle-wrap" for="source-{{ loop.index }}">
         <div>
-          <div class="toggle-label" style="font-family: var(--font-mono); font-size: 13px;">{{ source }}</div>
+          <div class="toggle-label" style="font-size: 13px;">
+            <div style="font-weight: 500;">{{ source_labels.get(source, source) }}</div>
+            <div style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px;">{{ source }}</div>
+          </div>
         </div>
         <label class="toggle">
           <input

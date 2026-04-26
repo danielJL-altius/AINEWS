@@ -131,6 +131,25 @@ def send_email(
 # PER-SUBSCRIBER PERSONALIZATION
 # =========================================================================
 
+def _url_matches_source_domains(url: str, enabled_domains: set) -> bool:
+    """True if the article URL's host is one of the Event Registry source domains."""
+    if not url or not enabled_domains:
+        return False
+    from urllib.parse import urlparse
+
+    try:
+        netloc = urlparse(url).netloc.lower().lstrip("www.")
+    except Exception:
+        return False
+    for dom in enabled_domains:
+        d = (dom or "").lower().strip()
+        if not d:
+            continue
+        if d in netloc or netloc.endswith(d):
+            return True
+    return False
+
+
 def _filter_content_for_subscriber(content, prefs: dict):
     """
     Return a copy of EmailContent with categories and bullets filtered to the
@@ -158,8 +177,10 @@ def _filter_content_for_subscriber(content, prefs: dict):
 
         if filter_sources:
             filtered_bullets = [
-                b for b in (cat.bullets or [])
-                if not b.source or b.source in enabled_sources
+                b
+                for b in (cat.bullets or [])
+                if (b.url and _url_matches_source_domains(b.url, enabled_sources))
+                or (b.source and b.source in enabled_sources)
             ]
         else:
             filtered_bullets = list(cat.bullets or [])

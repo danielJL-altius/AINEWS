@@ -30,8 +30,8 @@ from config import (
     DEDUP_CONTEXT_MAX_ROWS,
     DEDUP_TITLE_MAX_CHARS,
     LOOKBACK_HOURS,
-    PREFERRED_SOURCES,
-    SOURCE_DISPLAY_NAMES,
+    get_effective_source_display_names,
+    get_monitored_sources,
     TIMEZONE,
 )
 from src.dedup_archive import build_dedup_corpus_text
@@ -142,13 +142,16 @@ def run(*, dry_run: bool = False, skip_ingest: bool = False, verbose: bool = Tru
     # Determine which monitored source domains were cited in at least one bullet.
     # Match by checking if a preferred domain appears in the bullet's URL.
     from urllib.parse import urlparse
+
+    monitored = get_monitored_sources()
+    display_names = get_effective_source_display_names()
     active_domains: set = set()
     for cat in content.categories:
         for b in (cat.bullets or []):
             if b.url:
                 try:
                     netloc = urlparse(b.url).netloc.lower().lstrip("www.")
-                    for domain in PREFERRED_SOURCES:
+                    for domain in monitored:
                         if domain in netloc or netloc.endswith(domain):
                             active_domains.add(domain)
                             break
@@ -157,12 +160,12 @@ def run(*, dry_run: bool = False, skip_ingest: bool = False, verbose: bool = Tru
 
     # Build ordered source list with active flag for the template.
     all_sources = [
-        {"domain": d, "name": SOURCE_DISPLAY_NAMES.get(d, d), "active": d in active_domains}
-        for d in PREFERRED_SOURCES
+        {"domain": d, "name": display_names.get(d, d), "active": d in active_domains}
+        for d in monitored
     ]
 
     ingest_stats = {
-        "sources_count": len(PREFERRED_SOURCES),
+        "sources_count": len(monitored),
         "articles_scanned": sum(ingest_summary.values()) if ingest_summary else len(articles),
         "articles_to_llm": len(articles),
         "articles_surfaced": articles_surfaced,

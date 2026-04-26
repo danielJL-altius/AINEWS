@@ -16,6 +16,7 @@ Password is set via DASHBOARD_PASSWORD in .env (default: altius2026).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -29,21 +30,24 @@ sys.path.insert(0, os.path.dirname(__file__))
 from functools import wraps
 from typing import Any, Dict, List
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 from config import (
     CATEGORIES,
     DASHBOARD_PASSWORD,
     DASHBOARD_SECRET_KEY,
     DB_PATH,
-    PREFERRED_SOURCES,
     SECTOR_INGEST_CATEGORIES,
+    get_effective_source_display_names,
     get_ingest_dashboard_context,
+    get_monitored_sources,
+    normalize_source_uri,
 )
-from src.ingest_settings_io import save_raw
+from src.ingest_settings_io import load_raw, save_raw
 from src.inbound_routes import inbound_bp
 from src.db import (
     connect,
+    ensure_subscriber_source_rows,
     create_subscriber,
     delete_subscriber,
     get_all_subscribers,
@@ -64,6 +68,33 @@ app.register_blueprint(inbound_bp)
 
 # Ensure DB schema exists whether started via gunicorn or directly.
 init_db(DB_PATH)
+
+
+def _parse_extra_sources_json(raw: str) -> list:
+    """Form POST body: JSON array of {uri, title?}. On failure, keep prior from disk."""
+    prior = load_raw()
+    prior_list = prior.get("extra_sources") if isinstance(prior.get("extra_sources"), list) else []
+    s = (raw or "").strip()
+    if not s:
+        return prior_list
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError:
+        return prior_list
+    if not isinstance(data, list):
+        return prior_list
+    out: list = []
+    seen: set = set()
+    for item in data:
+        if not isinstance(item, dict) or not item.get("uri"):
+            continue
+        u = normalize_source_uri(str(item["uri"]))
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        t = (item.get("title") or u).strip() or u
+        out.append({"uri": u, "title": t})
+    return out
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +175,7 @@ def settings():
             mx = max(1, min(mx, 200))
         except ValueError:
             mx = 32
+        extra_sources = _parse_extra_sources_json(request.form.get("extra_sources_json", ""))
         payload = {
             "version": 1,
             "sector_keywords": sector,
@@ -152,14 +184,34 @@ def settings():
             "priority_tickers": _parse_ticker_line(request.form.get("priority_tickers", "")),
             "flag_names_3g": _parse_keyword_lines(request.form.get("flag_names_3g", "")),
             "max_keyword_alert_articles": mx,
+            "extra_sources": extra_sources,
         }
         save_raw(payload)
+        with connect(DB_PATH) as conn:
+            ensure_subscriber_source_rows(conn)
+            conn.commit()
         flash("Ingest settings saved to data/ingest_settings.json — restart is not required for the next scheduled job.")
         return redirect(url_for("settings"))
 
     ctx = get_ingest_dashboard_context()
     ctx["categories_sector"] = SECTOR_INGEST_CATEGORIES
     return render_template("dashboard/settings.html", **ctx)
+
+
+@app.route("/api/suggest-news-sources", methods=["GET"])
+@login_required
+def api_suggest_news_sources():
+    from src.source_suggest import suggest_news_source_prefix
+
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    try:
+        results = suggest_news_source_prefix(q, max_items=20)
+    except Exception as e:
+        log.warning("suggest news sources failed: %s", e)
+        return jsonify({"error": "lookup failed"}), 502
+    return jsonify(results)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -308,7 +360,8 @@ def subscriber(email: str):
         sub=sub,
         prefs=prefs,
         categories=CATEGORIES,
-        sources=PREFERRED_SOURCES,
+        sources=get_monitored_sources(),
+        source_labels=get_effective_source_display_names(),
     )
 
 
